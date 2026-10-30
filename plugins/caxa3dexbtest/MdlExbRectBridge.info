@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- CAXA 图纸环境模块自动加载登记：图纸环境启动时加载 ExbRectBridge.crx -->
+<Modules>
+  <File Template="ID_DFT_TMPL">CRX_PATH_PLACEHOLDER</File>
+</Modules>

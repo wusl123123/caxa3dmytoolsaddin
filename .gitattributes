@@ -1,0 +1,19 @@
+# 行尾策略：默认不做规范化，避免破坏 .ps1 的 BOM 与 .bat 的 CRLF 依赖
+* -text
+
+# Windows 脚本强制 CRLF（.bat 用 LF 会导致 goto/label 解析异常）
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# 二进制文件：禁止任何转换与文本 diff
+*.dll   binary
+*.exe   binary
+*.pdb   binary
+*.crx   binary
+*.snk   binary
+*.xlsx  binary
+*.bmp   binary
+*.png   binary
+*.ico   binary
+*.zip   binary
