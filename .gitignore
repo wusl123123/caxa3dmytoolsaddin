@@ -54,3 +54,8 @@ src/Host/*.pdb
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# ---------- AI 工具本地状态（agent 记忆/日志，不入库） ----------
+.workbuddy/
+.qoder/
+.claude/

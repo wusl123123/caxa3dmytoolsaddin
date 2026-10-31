@@ -1,5 +1,7 @@
 using System;
 using System.Drawing;
+using System.IO;
+using System.Reflection;
 using System.Windows.Forms;
 using Caxa3dMyTools.Contracts;
 
@@ -29,6 +31,20 @@ namespace caxa3dmytoolsaddin
         private const int MinButtonWidth = 140;
         private const int MaxButtonWidth = 240;
 
+        /// <summary>主窗口标题严格为「中文名称-yyyyMMddHHmm」，版本 = 主程序 DLL 写入时间，编译即自动更新。</summary>
+        private static string BuildStamp()
+        {
+            try
+            {
+                string path = Assembly.GetExecutingAssembly().Location;
+                return File.GetLastWriteTime(path).ToString("yyyyMMddHHmm");
+            }
+            catch
+            {
+                return DateTime.Now.ToString("yyyyMMddHHmm");
+            }
+        }
+
         // 按钮配色
         private static readonly Color BtnBackColor    = Color.White;
         private static readonly Color BtnHoverColor   = Color.FromArgb(229, 241, 251);
@@ -44,7 +60,7 @@ namespace caxa3dmytoolsaddin
 
         private void BuildUi()
         {
-            Text = "我的工具箱";
+            Text = "我的工具箱-" + BuildStamp();
             Font = new Font("Microsoft YaHei UI", 9F);
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(560, 400);

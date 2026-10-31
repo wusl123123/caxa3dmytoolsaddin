@@ -41,6 +41,9 @@ namespace caxa3dminitool
         private Button _btnSelectLinked;
 
         private Button _btnImportWire;
+        private Button _btnAnchorToCog;
+        private Button _btnGetPoint;
+        private Button _btnAddToBom;
 
         private TextBox _txtLog;
         private List<IZElement> _kernelQueue;
@@ -138,6 +141,21 @@ namespace caxa3dminitool
             _btnImportWire.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
             _btnImportWire.Click += (s, e) => ImportWireFromTxt();
             tool3.Controls.Add(_btnImportWire);
+
+            _btnAnchorToCog = MakeButton("锚点移至重心", 214, 8, 180, 40);
+            _btnAnchorToCog.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+            _btnAnchorToCog.Click += (s, e) => MoveAnchorToCog();
+            tool3.Controls.Add(_btnAnchorToCog);
+
+            _btnGetPoint = MakeButton("获取点坐标", 406, 8, 168, 40);
+            _btnGetPoint.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+            _btnGetPoint.Click += (s, e) => ShowPickedPointCoordinates();
+            tool3.Controls.Add(_btnGetPoint);
+
+            _btnAddToBom = MakeButton("将零部件添加到BOM", 586, 8, 190, 40);
+            _btnAddToBom.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+            _btnAddToBom.Click += (s, e) => AddSelectedToBom();
+            tool3.Controls.Add(_btnAddToBom);
 
             Controls.Add(tool3);
             Controls.Add(tool2);
@@ -240,6 +258,185 @@ namespace caxa3dminitool
             catch (Exception ex)
             {
                 Diagnostics.Log("导入3D曲线异常：" + ex);
+            }
+        }
+
+        // ================================================================ 锚点移至重心
+
+        /// <summary>
+        /// 取选中零件的重心（GetMassProperties）→ 把定位锚移到重心（不动几何、不动三维球）。
+        /// 判定：锚位置≈重心 且 几何位移≈0。
+        /// </summary>
+        private void MoveAnchorToCog()
+        {
+            if (_kernelRunning)
+            {
+                Diagnostics.Log("[未执行] 内核切换进行中，请稍后再试。");
+                return;
+            }
+
+            _btnAnchorToCog.Enabled = false;
+            try
+            {
+                string error, summary;
+                List<AnchorTool.Outcome> list = AnchorTool.MoveAnchorToCog(_app, out error, out summary);
+
+                if (!string.IsNullOrEmpty(error))
+                {
+                    Diagnostics.Log("[锚点移至重心] " + error);
+                    return;
+                }
+
+                foreach (AnchorTool.Outcome o in list)
+                {
+                    if (o.Ok)
+                    {
+                        Diagnostics.Log(string.Format(
+                            "[成功] {0}（{1}）：重心 ({2:F3}, {3:F3}, {4:F3}) mm，锚已移到重心，几何位移 {5:F3} mm",
+                            o.Name, o.Kind,
+                            o.Cog[0] * 1000.0, o.Cog[1] * 1000.0, o.Cog[2] * 1000.0,
+                            o.GeometryShift * 1000.0));
+                    }
+                    else
+                    {
+                        string note = string.IsNullOrEmpty(o.Note) ? "锚未能移到重心" : o.Note;
+                        Diagnostics.Log(string.Format("[失败] {0}（{1}）：{2}", o.Name, o.Kind, note.TrimEnd('；', ' ')));
+                    }
+                }
+
+                Diagnostics.Log("锚点移至重心结束：" + summary);
+                RefreshSelectionLabel();
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.Log("锚点移至重心异常：" + ex);
+            }
+            finally
+            {
+                _btnAnchorToCog.Enabled = true;
+            }
+        }
+
+        // ================================================================ 将零部件添加到BOM
+
+        /// <summary>
+        /// 选中零部件全部纳入 BOM（IncludedInBOM = true），回读确认后输出日志。
+        /// </summary>
+        private void AddSelectedToBom()
+        {
+            if (_kernelRunning)
+            {
+                Diagnostics.Log("[未执行] 内核切换进行中，请稍后再试。");
+                return;
+            }
+
+            _btnAddToBom.Enabled = false;
+            try
+            {
+                string error, summary;
+                List<BomTool.Outcome> list = BomTool.AddSelectedToBom(_app, out error, out summary);
+
+                if (!string.IsNullOrEmpty(error))
+                {
+                    Diagnostics.Log("[将零部件添加到BOM] " + error);
+                    return;
+                }
+
+                foreach (BomTool.Outcome o in list)
+                {
+                    if (o.Ok && o.WasIncluded)
+                        Diagnostics.Log(string.Format("[已是] {0}（{1}）：本就已纳入 BOM", o.Name, o.Kind));
+                    else if (o.Ok)
+                        Diagnostics.Log(string.Format("[成功] {0}（{1}）：已纳入 BOM（回读 IncludedInBOM=true）", o.Name, o.Kind));
+                    else
+                        Diagnostics.Log(string.Format("[失败] {0}：{1}", o.Name, (o.Note ?? "未知原因").TrimEnd('；', ' ')));
+                }
+
+                Diagnostics.Log("将零部件添加到BOM结束：" + summary);
+                RefreshSelectionLabel();
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.Log("将零部件添加到BOM异常：" + ex);
+            }
+            finally
+            {
+                _btnAddToBom.Enabled = true;
+            }
+        }
+
+        // ================================================================ 获取点坐标
+
+        /// <summary>
+        /// 读取选中点的坐标（IZVertex.Position + GetTransformToGlobal 换算全局），
+        /// 日志显示毫米坐标，并把第一个成功点的全局坐标复制到剪贴板（x,y,z）。
+        /// </summary>
+        private void ShowPickedPointCoordinates()
+        {
+            if (_kernelRunning)
+            {
+                Diagnostics.Log("[未执行] 内核切换进行中，请稍后再试。");
+                return;
+            }
+
+            _btnGetPoint.Enabled = false;
+            try
+            {
+                string error, summary;
+                List<PointTool.Outcome> list = PointTool.GetPickedPointCoordinates(_app, out error, out summary);
+
+                if (!string.IsNullOrEmpty(error))
+                {
+                    Diagnostics.Log("[获取点坐标] " + error);
+                    return;
+                }
+
+                string firstGlobal = null;
+                foreach (PointTool.Outcome o in list)
+                {
+                    if (o.Ok)
+                    {
+                        string line = string.Format("[点] {0}：全局 ({1:F3}, {2:F3}, {3:F3}) mm",
+                            o.Name, o.Global[0] * 1000.0, o.Global[1] * 1000.0, o.Global[2] * 1000.0);
+                        if (o.Local != null)
+                            line += string.Format("；体坐标 ({0:F3}, {1:F3}, {2:F3}) mm",
+                                o.Local[0] * 1000.0, o.Local[1] * 1000.0, o.Local[2] * 1000.0);
+                        line += "（来源：" + o.Source + "）";
+                        Diagnostics.Log(line);
+
+                        if (firstGlobal == null)
+                            firstGlobal = string.Format("{0:F3},{1:F3},{2:F3}",
+                                o.Global[0] * 1000.0, o.Global[1] * 1000.0, o.Global[2] * 1000.0);
+                    }
+                    else
+                    {
+                        Diagnostics.Log("[失败] " + o.Name + "：" + (o.Note ?? "未知原因").TrimEnd('；', ' '));
+                    }
+                }
+
+                if (firstGlobal != null)
+                {
+                    try
+                    {
+                        Clipboard.SetText(firstGlobal);
+                        Diagnostics.Log("第一个点的全局坐标已复制到剪贴板：" + firstGlobal);
+                    }
+                    catch (Exception ex)
+                    {
+                        Diagnostics.Trace("剪贴板复制失败：" + ex.Message);
+                    }
+                }
+
+                Diagnostics.Log("获取点坐标结束：" + summary);
+                RefreshSelectionLabel();
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.Log("获取点坐标异常：" + ex);
+            }
+            finally
+            {
+                _btnGetPoint.Enabled = true;
             }
         }
 

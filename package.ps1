@@ -64,7 +64,8 @@ if ($missing.Count -gt 0) {
 }
 Write-Host ("缺件校验通过：{0} 个插件工程已全部暂存" -f $pluginDirs.Count) -ForegroundColor Green
 
-$version = [Reflection.AssemblyName]::GetAssemblyName($hostDll).Version.ToString()
+# 版本与主窗口标题一致：主程序 DLL 写入时间 yyyyMMddHHmm（编译即自动更新）
+$version = (Get-Item $hostDll).LastWriteTime.ToString('yyyyMMddHHmm')
 $name    = "caxa3dmytoolsaddin-$version"
 $stage   = Join-Path $dist $name
 $zip     = Join-Path $dist "$name.zip"
