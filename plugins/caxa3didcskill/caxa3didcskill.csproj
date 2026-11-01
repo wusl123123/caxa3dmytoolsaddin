@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      独立插件列的外部工具启动器（DLL），真正的业务逻辑在 tools\caxa3didcskill 的
+      caxa3didcskill.exe 里（进程外执行，规则 16.6）。
+      本工程不引用 interop.ICApiIronCAD：启动器不碰任何 CAXA 类型。
+    -->
+    <OutputType>Library</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>caxa3didcskill</RootNamespace>
+    <AssemblyName>caxa3didcskill</AssemblyName>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <!-- CAXA 3D 均为 64 位进程，插件 DLL 必须 x64 -->
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <!-- 与 Host / 其余插件同一密钥（publicKeyToken = 56647e1eee90f6d4） -->
+    <AssemblyOriginatorKeyFile>..\..\Lib\ICApiAddin.snk</AssemblyOriginatorKeyFile>
+    <SignAssembly>true</SignAssembly>
+    <DelaySign>false</DelaySign>
+    <Version>1.0.0.0</Version>
+    <Product>caxa3didcskill</Product>
+    <AssemblyTitle>CAXA 3D 后台进程清理（独立插件启动器）</AssemblyTitle>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+  </PropertyGroup>
+
+  <!-- 无 Visual Studio 的机器上也能用 dotnet build 编译 net48 -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
+      <PrivateAssets>All</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- 插件契约：Host 反射加载的唯一耦合点 -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Contracts\Contracts.csproj" />
+  </ItemGroup>
+
+  <!--
+    外部 EXE 由 tools\caxa3didcskill 工程编译；这里只做「编译后拷到输出目录」，
+    让单独 dotnet build 本工程时输出目录也是「启动器 DLL + 目标 EXE」的完整组合。
+    build.ps1 另有一步把 EXE 显式拷进 src\plugins\caxa3didcskill。
+  -->
+  <Target Name="CopyStandaloneTool" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)\..\..\tools\caxa3didcskill\bin\x64\Release\net48\caxa3didcskill.exe')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\tools\caxa3didcskill\bin\x64\Release\net48\caxa3didcskill.exe"
+          DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>caxa3dcodenameextraction</RootNamespace>
+    <AssemblyName>caxa3dcodenameextraction</AssemblyName>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <!-- CAXA 3D 2027 为 64 位进程，Add-in DLL 必须 x64 -->
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <AssemblyOriginatorKeyFile>Lib\ICApiAddin.snk</AssemblyOriginatorKeyFile>
+    <SignAssembly>true</SignAssembly>
+    <DelaySign>false</DelaySign>
+    <Version>1.0.0.0</Version>
+    <Product>caxa3dcodenameextraction</Product>
+    <AssemblyTitle>带图改名及图号分离</AssemblyTitle>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+  </PropertyGroup>
+
+  <!-- 无 Visual Studio 的机器上也能用 dotnet build 编译 net48 -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
+      <PrivateAssets>All</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- 唯一公共耦合点：插件契约（由 Host 反射调用） -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Contracts\Contracts.csproj" />
+  </ItemGroup>
+
+  <!-- CAXA 3D 类型库生成的 interop 程序集（类型嵌入本 DLL，运行期无外部依赖） -->
+  <ItemGroup>
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="interop.ICApiIronCAD">
+      <HintPath>Lib\interop.ICApiIronCAD.dll</HintPath>
+      <EmbedInteropTypes>True</EmbedInteropTypes>
+    </Reference>
+    <!-- CreateCommandHandler 按钮图标参数类型（来自 GAC 的 PIA，与官方样例一致） -->
+    <Reference Include="stdole, Version=7.0.3300.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+      <HintPath>C:\Windows\assembly\GAC\stdole\7.0.3300.0__b03f5f7f11d50a3a\stdole.dll</HintPath>
+      <EmbedInteropTypes>True</EmbedInteropTypes>
+    </Reference>
+  </ItemGroup>
+
+  <!-- 运行期资源随编译拷到输出目录：规则/说明/控件基线/CRX 注册脚本/CRX 桥本体 -->
+  <ItemGroup>
+    <None Update="caxa3dcodenameextraction图号分离规则.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="caxa3dcodenameextraction使用说明.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="caxa3dsheetsizewriteaddfix.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Dlg3DInfo.ctl-baseline.ini" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="ExbLinkPatch.exe" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="register-crx.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="unregister-crx.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="caxa3dcodenameextraction-crx\bin\caxa3dcodenameextraction.crx"
+          Link="caxa3dcodenameextraction.crx"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    本插件不再是 CAXA 直接登记的内置 Add-in：由 caxa3dmytoolsaddin 主程序反射加载，
+    因此不生成/内嵌 SxS 清单（这正是多插件 ProgID 冲突的根源）。
+    强名称签名保留，供 Host 侧统一校验。
+  -->
+
+</Project>

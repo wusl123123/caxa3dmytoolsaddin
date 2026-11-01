@@ -1,0 +1,61 @@
+# ============================================================
+# caxa3dmytoolsaddin / CAXA 3D Add-in 集合体
+# ============================================================
+
+# ---------- 构建产物 ----------
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+src/plugins/
+dist/
+
+# Host 目录下的散落编译输出
+src/Host/*.dll
+src/Host/*.pdb
+
+# ---------- Visual Studio / MSBuild ----------
+.vs/
+*.user
+*.suo
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+*.aps
+*.log
+
+# ---------- C++ 中间产物（CRX 桥工程） ----------
+*.ilk
+*.pch
+*.ipch
+*.sdf
+*.opensdf
+*.obj
+*.idb
+*.tlog
+*.lastbuildstate
+
+# ---------- 强名称私钥（不入库） ----------
+# 仓库不含 ICApiAddin.snk，编译前需自备：
+#   Lib\ICApiAddin.snk 以及各插件下的 Lib\ICApiAddin.snk
+*.snk
+*.pfx
+
+# ---------- 打包 / 临时 ----------
+*.zip
+*.7z
+*.bak
+*.tmp
+*.swp
+
+# ---------- 系统 ----------
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---------- AI 工具本地状态（agent 记忆/日志，不入库） ----------
+.workbuddy/
+.qoder/
+.claude/

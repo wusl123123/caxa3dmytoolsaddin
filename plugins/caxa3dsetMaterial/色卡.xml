@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 色卡：来源 SolidWorks 宏 usfSetColor.frm（RAL 经典系列 + GSB05-1426-2001 漆膜颜色标准样卡） -->
+<!-- 字段：series=色卡标准 display=完整名称 rgb=RRGGBB -->
+<ColorCardDB version="1">
+  <color series="RAL" display="RAL 1000 米绿色" rgb="BEBD7F" />
+  <color series="RAL" display="RAL 1001 淡黄色" rgb="C2B078" />
+  <color series="RAL" display="RAL 1002 沙黄色" rgb="C6A664" />
+  <color series="RAL" display="RAL 1003 信号黄" rgb="E5BE01" />
+  <color series="RAL" display="RAL 1004 金黄色" rgb="CDA434" />
+  <color series="RAL" display="RAL 1005 蜜黄色" rgb="A98307" />
+  <color series="RAL" display="RAL 1006 玉米黄" rgb="E4A010" />
+  <color series="RAL" display="RAL 1007 灰黄" rgb="DC9C00" />
+  <color series="RAL" display="RAL 1011 米褐色" rgb="8A6642" />
+  <color series="RAL" display="RAL 1012 柠檬黄" rgb="C7B446" />
+  <color series="RAL" display="RAL 1013 白浅灰" rgb="EAE6CA" />
+  <color series="RAL" display="RAL 1014 象牙色" rgb="E1CC4F" />
+  <color series="RAL" display="RAL 1015 亮象牙色" rgb="E6D690" />
+  <color series="RAL" display="RAL 1016 硫磺色" rgb="EDFF21" />
+  <color series="RAL" display="RAL 1017 深黄色" rgb="F5D033" />
+  <color series="RAL" display="RAL 1018 绿黄色" rgb="F8F335" />
+  <color series="RAL" display="RAL 1019 米灰色" rgb="9E9764" />
+  <color series="RAL" display="RAL 1020 橄榄黄" rgb="989950" />
+  <color series="RAL" display="RAL 1021 油菜黄" rgb="F3DA0B" />
+  <color series="RAL" display="RAL 1023 交通黄" rgb="FAD201" />
+  <color series="RAL" display="RAL 1024 赭黄" rgb="AEA04B" />
+  <color series="RAL" display="RAL 1026 亮黄色" rgb="FFFF00" />
+  <color series="RAL" display="RAL 1027 咖喱色" rgb="9D9101" />
+  <color series="RAL" display="RAL 1028 浅橙黄" rgb="F4A900" />
+  <color series="RAL" display="RAL 1032 金雀花黄" rgb="D6AE00" />
+  <color series="RAL" display="RAL 1033 大丽花黄" rgb="F3A505" />
+  <color series="RAL" display="RAL 1034 粉黄色" rgb="EFA94A" />
+  <color series="RAL" display="RAL 1035 米珍珠色" rgb="6A5D4D" />
+  <color series="RAL" display="RAL 1036 金黄珍珠" rgb="705335" />
+  <color series="RAL" display="RAL 1037 日光黄" rgb="F39F18" />
+  <color series="RAL" display="RAL 2000 黄橙色" rgb="ED760E" />
+  <color series="RAL" display="RAL 2001 橘红" rgb="C93C20" />
+  <color series="RAL" display="RAL 2002 朱红" rgb="CB2821" />
+  <color series="RAL" display="RAL 2003 淡橙" rgb="FF7514" />
+  <color series="RAL" display="RAL 2004 纯橙" rgb="F44611" />
+  <color series="RAL" display="RAL 2005 亮橙" rgb="FF2301" />
+  <color series="RAL" display="RAL 2007 亮浅橙" rgb="FFA420" />
+  <color series="RAL" display="RAL 2008 浅红橙" rgb="F75E25" />
+  <color series="RAL" display="RAL 2009 交通橙" rgb="F54021" />
+  <color series="RAL" display="RAL 2010 信号橙" rgb="D84B20" />
+  <color series="RAL" display="RAL 2011 深橙色" rgb="EC7C26" />
+  <color series="RAL" display="RAL 2012 鲑鱼橙" rgb="EB6A37" />
+  <color series="RAL" display="RAL 2013 珍珠橙" rgb="C35831" />
+  <color series="RAL" display="RAL 2017 RAL橙色" rgb="FC5500" />
+  <color series="RAL" display="RAL 3000 火焰红" rgb="AF2B1E" />
+  <color series="RAL" display="RAL 3001 信号红" rgb="A52019" />
+  <color series="RAL" display="RAL 3002 胭脂红" rgb="A2231D" />
+  <color series="RAL" display="RAL 3003 宝石红" rgb="9B111E" />
+  <color series="RAL" display="RAL 3004 紫红" rgb="75151E" />
+  <color series="RAL" display="RAL 3005 葡萄酒红" rgb="5E2129" />
+  <color series="RAL" display="RAL 3007 黑红" rgb="412227" />
+  <color series="RAL" display="RAL 3009 氧化红" rgb="642424" />
+  <color series="RAL" display="RAL 3011 红玄武土色" rgb="781F19" />
+  <color series="RAL" display="RAL 3012 米红色" rgb="C1876B" />
+  <color series="RAL" display="RAL 3013 番茄红" rgb="A12312" />
+  <color series="RAL" display="RAL 3014 古粉红色" rgb="D36E70" />
+  <color series="RAL" display="RAL 3015 淡粉红色" rgb="EA899A" />
+  <color series="RAL" display="RAL 3016 珊瑚红色" rgb="B32821" />
+  <color series="RAL" display="RAL 3017 玫瑰色" rgb="E63244" />
+  <color series="RAL" display="RAL 3018 草莓红" rgb="D52232" />
+  <color series="RAL" display="RAL 3020 交通红" rgb="CC0605" />
+  <color series="RAL" display="RAL 3022 鲑鱼粉红" rgb="D95030" />
+  <color series="RAL" display="RAL 3024 亮红" rgb="F80000" />
+  <color series="RAL" display="RAL 3026 淡亮红" rgb="FE0000" />
+  <color series="RAL" display="RAL 3027 悬钩子红" rgb="C51D34" />
+  <color series="RAL" display="RAL 3028 纯红" rgb="CC2C24" />
+  <color series="RAL" display="RAL 3031 戈亚红" rgb="B32428" />
+  <color series="RAL" display="RAL 3032 红宝石珍珠红" rgb="721422" />
+  <color series="RAL" display="RAL 3033 珍珠红色" rgb="B44C43" />
+  <color series="RAL" display="RAL 4001 丁香红" rgb="6D3F5B" />
+  <color series="RAL" display="RAL 4002 紫红" rgb="922B3E" />
+  <color series="RAL" display="RAL 4003 石楠紫" rgb="DE4C8A" />
+  <color series="RAL" display="RAL 4004 酒红紫" rgb="6E1C34" />
+  <color series="RAL" display="RAL 4005 丁香蓝" rgb="6C4675" />
+  <color series="RAL" display="RAL 4006 交通紫" rgb="A03472" />
+  <color series="RAL" display="RAL 4007 紫红蓝色" rgb="4A192C" />
+  <color series="RAL" display="RAL 4008 信号紫罗兰" rgb="924E7D" />
+  <color series="RAL" display="RAL 4009 菘蓝紫色" rgb="A47D90" />
+  <color series="RAL" display="RAL 4010 电视品红" rgb="D72D6D" />
+  <color series="RAL" display="RAL 4011 珍珠紫" rgb="8673A1" />
+  <color series="RAL" display="RAL 4012 珍珠黑" rgb="6C6881" />
+  <color series="RAL" display="RAL 5000 紫蓝色" rgb="2A2E4B" />
+  <color series="RAL" display="RAL 5001 蓝绿色" rgb="1F3438" />
+  <color series="RAL" display="RAL 5002 群青蓝" rgb="20214F" />
+  <color series="RAL" display="RAL 5003 蓝宝石蓝" rgb="1D1E33" />
+  <color series="RAL" display="RAL 5004 蓝黑色" rgb="18171C" />
+  <color series="RAL" display="RAL 5005 信号蓝" rgb="1E2D6E" />
+  <color series="RAL" display="RAL 5007 亮蓝色" rgb="3E5F8A" />
+  <color series="RAL" display="RAL 5008 灰蓝色" rgb="26252D" />
+  <color series="RAL" display="RAL 5009 天青蓝" rgb="025669" />
+  <color series="RAL" display="RAL 5010 龙胆蓝" rgb="0E294B" />
+  <color series="RAL" display="RAL 5011 钢蓝色" rgb="231A24" />
+  <color series="RAL" display="RAL 5012 淡蓝色" rgb="3B83BD" />
+  <color series="RAL" display="RAL 5013 钴蓝色" rgb="25294A" />
+  <color series="RAL" display="RAL 5014 鸽蓝色" rgb="606F8C" />
+  <color series="RAL" display="RAL 5015 天蓝色" rgb="2271B3" />
+  <color series="RAL" display="RAL 5017 交通蓝" rgb="063971" />
+  <color series="RAL" display="RAL 5018 绿松石蓝" rgb="3F888F" />
+  <color series="RAL" display="RAL 5019 卡布里蓝色" rgb="1B5583" />
+  <color series="RAL" display="RAL 5020 海蓝色" rgb="1D334A" />
+  <color series="RAL" display="RAL 5021 不来梅蓝色" rgb="256D7B" />
+  <color series="RAL" display="RAL 5022 夜蓝色" rgb="252850" />
+  <color series="RAL" display="RAL 5023 冷蓝色" rgb="49678D" />
+  <color series="RAL" display="RAL 5024 菘蓝蓝色" rgb="5D9B9B" />
+  <color series="RAL" display="RAL 5025 珍珠龙胆蓝" rgb="2A6478" />
+  <color series="RAL" display="RAL 5026 珍珠夜蓝" rgb="102C54" />
+  <color series="RAL" display="RAL 6000 铜锈绿色" rgb="316650" />
+  <color series="RAL" display="RAL 6001 翡翠绿色" rgb="287233" />
+  <color series="RAL" display="RAL 6002 叶绿" rgb="2D572C" />
+  <color series="RAL" display="RAL 6003 橄榄绿" rgb="424632" />
+  <color series="RAL" display="RAL 6004 蓝绿" rgb="1F3A3D" />
+  <color series="RAL" display="RAL 6005 苔藓绿" rgb="2F4538" />
+  <color series="RAL" display="RAL 6006 橄榄灰绿" rgb="3E3B32" />
+  <color series="RAL" display="RAL 6007 瓶绿" rgb="343B29" />
+  <color series="RAL" display="RAL 6008 褐绿" rgb="39352A" />
+  <color series="RAL" display="RAL 6009 冷杉绿" rgb="31372B" />
+  <color series="RAL" display="RAL 6010 草绿" rgb="35682D" />
+  <color series="RAL" display="RAL 6011 淡橄榄绿" rgb="587246" />
+  <color series="RAL" display="RAL 6012 墨绿色" rgb="343E40" />
+  <color series="RAL" display="RAL 6013 芦苇绿" rgb="6C7156" />
+  <color series="RAL" display="RAL 6014 橄榄黄" rgb="47402E" />
+  <color series="RAL" display="RAL 6015 黑齐墩果色" rgb="3B3C36" />
+  <color series="RAL" display="RAL 6016 绿松石绿色" rgb="1E5945" />
+  <color series="RAL" display="RAL 6017 五月绿" rgb="4C9141" />
+  <color series="RAL" display="RAL 6018 黄绿色" rgb="57A639" />
+  <color series="RAL" display="RAL 6019 菘蓝绿色" rgb="BDECB6" />
+  <color series="RAL" display="RAL 6020 铭绿色" rgb="2E3A23" />
+  <color series="RAL" display="RAL 6021 浅绿色" rgb="89AC76" />
+  <color series="RAL" display="RAL 6022 橄榄土褐色" rgb="25221B" />
+  <color series="RAL" display="RAL 6024 交通绿" rgb="308446" />
+  <color series="RAL" display="RAL 6025 蕨绿色" rgb="3D642D" />
+  <color series="RAL" display="RAL 6026 蛋白石绿色" rgb="015D52" />
+  <color series="RAL" display="RAL 6027 浅绿色" rgb="84C3BE" />
+  <color series="RAL" display="RAL 6028 松绿" rgb="2C5545" />
+  <color series="RAL" display="RAL 6029 薄荷绿" rgb="20603D" />
+  <color series="RAL" display="RAL 6032 信号绿" rgb="317F43" />
+  <color series="RAL" display="RAL 6033 薄荷绿蓝色" rgb="497E76" />
+  <color series="RAL" display="RAL 6034 菘蓝松石色" rgb="7FB5B5" />
+  <color series="RAL" display="RAL 6035 珍珠绿" rgb="194D25" />
+  <color series="RAL" display="RAL 6036 珍珠蛋白石绿" rgb="04574B" />
+  <color series="RAL" display="RAL 6037 纯绿" rgb="2A7E3E" />
+  <color series="RAL" display="RAL 6038 荧光绿" rgb="00A64F" />
+  <color series="RAL" display="RAL 6039 纤维绿" rgb="3C9E4E" />
+  <color series="RAL" display="RAL 7000 松鼠灰" rgb="78858B" />
+  <color series="RAL" display="RAL 7001 银灰" rgb="8A9597" />
+  <color series="RAL" display="RAL 7002 橄榄灰绿色" rgb="7E7B52" />
+  <color series="RAL" display="RAL 7003 苔藓绿色" rgb="6C7059" />
+  <color series="RAL" display="RAL 7004 信号灰" rgb="969992" />
+  <color series="RAL" display="RAL 7005 鼠灰色" rgb="646B63" />
+  <color series="RAL" display="RAL 7006 米灰色" rgb="6D6552" />
+  <color series="RAL" display="RAL 7008 土黄灰色" rgb="6A5F31" />
+  <color series="RAL" display="RAL 7009 绿灰色" rgb="4D5645" />
+  <color series="RAL" display="RAL 7010 油布灰" rgb="4C514A" />
+  <color series="RAL" display="RAL 7011 铁灰" rgb="434B4D" />
+  <color series="RAL" display="RAL 7012 玄武石灰" rgb="4E5754" />
+  <color series="RAL" display="RAL 7013 褐灰色" rgb="464531" />
+  <color series="RAL" display="RAL 7015 浅橄榄灰" rgb="434750" />
+  <color series="RAL" display="RAL 7016 煤灰" rgb="293133" />
+  <color series="RAL" display="RAL 7021 黑灰" rgb="23282B" />
+  <color series="RAL" display="RAL 7022 暗灰" rgb="332F2C" />
+  <color series="RAL" display="RAL 7023 混凝土灰" rgb="686C5E" />
+  <color series="RAL" display="RAL 7024 石墨灰" rgb="474A51" />
+  <color series="RAL" display="RAL 7026 花岗灰" rgb="2F353B" />
+  <color series="RAL" display="RAL 7030 石灰色" rgb="8B8C7A" />
+  <color series="RAL" display="RAL 7031 蓝灰色" rgb="474B4E" />
+  <color series="RAL" display="RAL 7032 卵石灰" rgb="B8B799" />
+  <color series="RAL" display="RAL 7033 水泥灰" rgb="7D8471" />
+  <color series="RAL" display="RAL 7034 黄灰色" rgb="8F8B66" />
+  <color series="RAL" display="RAL 7035 浅灰" rgb="D7D7D7" />
+  <color series="RAL" display="RAL 7036 铂灰色" rgb="7F7679" />
+  <color series="RAL" display="RAL 7037 土灰色" rgb="7D7F78" />
+  <color series="RAL" display="RAL 7038 玛瑙灰" rgb="C3C3C3" />
+  <color series="RAL" display="RAL 7039 石英灰" rgb="6C6960" />
+  <color series="RAL" display="RAL 7040 窗灰色" rgb="9DA1AA" />
+  <color series="RAL" display="RAL 7042 通灰A" rgb="8D948D" />
+  <color series="RAL" display="RAL 7043 通灰B" rgb="4E5452" />
+  <color series="RAL" display="RAL 7044 深铭灰色" rgb="CAC4B0" />
+  <color series="RAL" display="RAL 7045 视灰1" rgb="909090" />
+  <color series="RAL" display="RAL 7046 视灰2" rgb="82898F" />
+  <color series="RAL" display="RAL 7047 视灰4" rgb="D0D0D0" />
+  <color series="RAL" display="RAL 7048 珍珠鼠灰" rgb="898176" />
+  <color series="RAL" display="RAL 8000 绿褐色" rgb="826C34" />
+  <color series="RAL" display="RAL 8001 赭石棕色" rgb="955F20" />
+  <color series="RAL" display="RAL 8002 信号褐" rgb="6C3B2A" />
+  <color series="RAL" display="RAL 8003 土棕褐色" rgb="734222" />
+  <color series="RAL" display="RAL 8004 铜棕色" rgb="8E402A" />
+  <color series="RAL" display="RAL 8007 鹿褐色" rgb="59351F" />
+  <color series="RAL" display="RAL 8008 橄榄棕" rgb="6F4F28" />
+  <color series="RAL" display="RAL 8011 深棕色" rgb="5B3A29" />
+  <color series="RAL" display="RAL 8012 红褐色" rgb="592321" />
+  <color series="RAL" display="RAL 8014 乌贼棕色" rgb="382C1E" />
+  <color series="RAL" display="RAL 8015 棕色" rgb="633A34" />
+  <color series="RAL" display="RAL 8016 桃花心木色" rgb="4C2F27" />
+  <color series="RAL" display="RAL 8017 巧克力棕色" rgb="45322E" />
+  <color series="RAL" display="RAL 8019 灰褐色" rgb="403A3A" />
+  <color series="RAL" display="RAL 8022 黑褐色" rgb="212121" />
+  <color series="RAL" display="RAL 8023 桔黄褐" rgb="A65E2E" />
+  <color series="RAL" display="RAL 8024 哔叽棕色" rgb="79553D" />
+  <color series="RAL" display="RAL 8025 浅褐色" rgb="755C48" />
+  <color series="RAL" display="RAL 8028 浅灰褐色" rgb="4E3B31" />
+  <color series="RAL" display="RAL 8029 珍珠铜棕色" rgb="763C28" />
+  <color series="RAL" display="RAL 9001 彩黄色" rgb="FAF4E3" />
+  <color series="RAL" display="RAL 9002 灰白色" rgb="E7EBDA" />
+  <color series="RAL" display="RAL 9003 信号白" rgb="F4F4F4" />
+  <color series="RAL" display="RAL 9004 信号黑" rgb="282828" />
+  <color series="RAL" display="RAL 9005 墨黑色" rgb="0A0A0A" />
+  <color series="RAL" display="RAL 9006 白铝灰" rgb="A5A5A5" />
+  <color series="RAL" display="RAL 9007 灰铝色" rgb="8F8F8F" />
+  <color series="RAL" display="RAL 9010 纯白色" rgb="FFFFFF" />
+  <color series="RAL" display="RAL 9011 石墨黑" rgb="1C1C1C" />
+  <color series="RAL" display="RAL 9012 洁净室白" rgb="FFFDE6" />
+  <color series="RAL" display="RAL 9016 交通白" rgb="F6F6F6" />
+  <color series="RAL" display="RAL 9017 交通黑" rgb="1E1E1E" />
+  <color series="RAL" display="RAL 9018 草纸白" rgb="D7D7D7" />
+  <color series="RAL" display="RAL 9022 珍珠浅灰" rgb="9C9C9C" />
+  <color series="RAL" display="RAL 9023 珍珠深灰" rgb="828282" />
+  <color series="GSB05-1426-2001" display="PB01 深（铁）蓝" rgb="070D1D" />
+  <color series="GSB05-1426-2001" display="PB02 深（酞）蓝" rgb="0B1539" />
+  <color series="GSB05-1426-2001" display="PB03 中（铁）蓝" rgb="0B1937" />
+  <color series="GSB05-1426-2001" display="PB04 中（酞）蓝" rgb="0A1C53" />
+  <color series="GSB05-1426-2001" display="PB11 孔雀蓝" rgb="0F3988" />
+  <color series="GSB05-1426-2001" display="PB05 海蓝" rgb="1A4788" />
+  <color series="GSB05-1426-2001" display="PB06 淡（酞）蓝" rgb="215FAA" />
+  <color series="GSB05-1426-2001" display="PB07 淡（铁）蓝" rgb="38679C" />
+  <color series="GSB05-1426-2001" display="PB08 蓝灰" rgb="264A62" />
+  <color series="GSB05-1426-2001" display="PB09 天（酞）蓝" rgb="58A2D0" />
+  <color series="GSB05-1426-2001" display="PB10 天（铁）蓝" rgb="77B7C9" />
+  <color series="GSB05-1426-2001" display="B06 淡天（酞）蓝" rgb="C2EAE1" />
+  <color series="GSB05-1426-2001" display="B07 蛋青" rgb="AFD8C8" />
+  <color series="GSB05-1426-2001" display="B08 稚蓝" rgb="9CD5CC" />
+  <color series="GSB05-1426-2001" display="B09 宝石蓝" rgb="3A8693" />
+  <color series="GSB05-1426-2001" display="B10 鲜蓝" rgb="236B9D" />
+  <color series="GSB05-1426-2001" display="B11 淡海（铁）蓝" rgb="285C71" />
+  <color series="GSB05-1426-2001" display="B12 中海（铁）蓝" rgb="1D4B5A" />
+  <color series="GSB05-1426-2001" display="B13 深海（铁）蓝" rgb="173037" />
+  <color series="GSB05-1426-2001" display="B14 景蓝" rgb="164B5B" />
+  <color series="GSB05-1426-2001" display="B15 艳蓝" rgb="1F6366" />
+  <color series="GSB05-1426-2001" display="BG04 鲜绿" rgb="2A7765" />
+  <color series="GSB05-1426-2001" display="BG03 宝绿" rgb="539F83" />
+  <color series="GSB05-1426-2001" display="BG02 湖绿" rgb="80B28C" />
+  <color series="GSB05-1426-2001" display="BG05 淡湖绿" rgb="90CDAC" />
+  <color series="GSB05-1426-2001" display="G07 蛋壳绿" rgb="C5DEBE" />
+  <color series="GSB05-1426-2001" display="G08 淡苹果绿" rgb="9CCF96" />
+  <color series="GSB05-1426-2001" display="G01 苹果绿" rgb="98D08F" />
+  <color series="GSB05-1426-2001" display="G09 深豆绿" rgb="3E7139" />
+  <color series="GSB05-1426-2001" display="G02 淡绿" rgb="166325" />
+  <color series="GSB05-1426-2001" display="G03 艳绿" rgb="155320" />
+  <color series="GSB05-1426-2001" display="G04 中绿" rgb="143313" />
+  <color series="GSB05-1426-2001" display="G05 深绿" rgb="0E2916" />
+  <color series="GSB05-1426-2001" display="G06 橄榄绿" rgb="101E11" />
+  <color series="GSB05-1426-2001" display="GY05 褐绿" rgb="2A2F18" />
+  <color series="GSB05-1426-2001" display="GY04 草绿" rgb="26310F" />
+  <color series="GSB05-1426-2001" display="GY06 军车绿" rgb="2C3C17" />
+  <color series="GSB05-1426-2001" display="GY02 纺绿" rgb="556B3D" />
+  <color series="GSB05-1426-2001" display="GY07 豆蔻绿" rgb="6FB657" />
+  <color series="GSB05-1426-2001" display="GY01 豆绿" rgb="9DD27A" />
+  <color series="GSB05-1426-2001" display="GY08 果（酞）绿" rgb="B1E092" />
+  <color series="GSB05-1426-2001" display="Y11 乳白" rgb="F8EAC3" />
+  <color series="GSB05-1426-2001" display="Y02 珍珠" rgb="F1E49E" />
+  <color series="GSB05-1426-2001" display="Y12 米黄" rgb="EAD89A" />
+  <color series="GSB05-1426-2001" display="Y03 奶油" rgb="F1DF95" />
+  <color series="GSB05-1426-2001" display="Y04 象牙" rgb="F3DC74" />
+  <color series="GSB05-1426-2001" display="Y05 柠黄" rgb="F1DC15" />
+  <color series="GSB05-1426-2001" display="Y06 淡黄" rgb="F0D40F" />
+  <color series="GSB05-1426-2001" display="Y07 中黄" rgb="EEA501" />
+  <color series="GSB05-1426-2001" display="Y08 深黄" rgb="FA9801" />
+  <color series="GSB05-1426-2001" display="Y09 铁黄" rgb="A36614" />
+  <color series="GSB05-1426-2001" display="Y10 军黄" rgb="3D3913" />
+  <color series="GSB05-1426-2001" display="YR06 棕黄" rgb="93470B" />
+  <color series="GSB05-1426-2001" display="YR01 淡棕" rgb="622F10" />
+  <color series="GSB05-1426-2001" display="YR07 深棕黄" rgb="472912" />
+  <color series="GSB05-1426-2001" display="YR02 赭黄" rgb="362713" />
+  <color series="GSB05-1426-2001" display="YR05 棕" rgb="2E150F" />
+  <color series="GSB05-1426-2001" display="YR03 紫棕" rgb="1E100D" />
+  <color series="GSB05-1426-2001" display="YR04 桔黄" rgb="EF3C0D" />
+  <color series="GSB05-1426-2001" display="R05 桔红" rgb="DF2C12" />
+  <color series="GSB05-1426-2001" display="R02 朱红" rgb="C31713" />
+  <color series="GSB05-1426-2001" display="R03 大红" rgb="C70D14" />
+  <color series="GSB05-1426-2001" display="R04 紫红" rgb="660B10" />
+  <color series="GSB05-1426-2001" display="R01 铁红" rgb="56140D" />
+  <color series="GSB05-1426-2001" display="RP03 玫瑰红" rgb="961D4A" />
+  <color series="GSB05-1426-2001" display="RP04 淡玫瑰" rgb="C04A7C" />
+  <color series="GSB05-1426-2001" display="RP01 粉红" rgb="F2A4BA" />
+  <color series="GSB05-1426-2001" display="RP02 淡粉红" rgb="FBC2D3" />
+  <color series="GSB05-1426-2001" display="P01 淡紫" rgb="D0C5D3" />
+  <color series="GSB05-1426-2001" display="P02 紫" rgb="8C81B9" />
+  <color series="GSB05-1426-2001" display="B01 深灰" rgb="334141" />
+  <color series="GSB05-1426-2001" display="B02 中灰" rgb="505C5A" />
+  <color series="GSB05-1426-2001" display="B03 淡灰" rgb="6A7570" />
+  <color series="GSB05-1426-2001" display="B04 银灰" rgb="7A877D" />
+  <color series="GSB05-1426-2001" display="B05 海灰" rgb="98A7A0" />
+  <color series="GSB05-1426-2001" display="G10 飞机灰" rgb="8D9E8F" />
+  <color series="GSB05-1426-2001" display="GY09 冰灰" rgb="C7CDB3" />
+  <color series="GSB05-1426-2001" display="BG01 中绿灰" rgb="718272" />
+  <color series="GSB05-1426-2001" display="GY10 机床灰" rgb="525E4F" />
+  <color series="GSB05-1426-2001" display="GY03 橄榄灰" rgb="5C664B" />
+  <color series="GSB05-1426-2001" display="Y01 驼灰" rgb="7E7953" />
+  <color series="GSB05-1426-2001" display="Y13 淡黄灰" rgb="8E9478" />
+  <color series="GSB05-1426-2001" display="GY11 玉灰" rgb="94A47F" />
+</ColorCardDB>
