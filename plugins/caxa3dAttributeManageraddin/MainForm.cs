@@ -348,27 +348,22 @@ namespace caxa3dAttributeManageraddin
 
  private string GetDefaultTablePath()
  {
- // 插件集成后程序基目录是 CAXA bin，模板实际随插件放在插件目录里
- if (!string.IsNullOrEmpty(_pluginDirectory))
- {
- string pluginPath = Path.Combine(_pluginDirectory, "caxa3dManagermodle.xlsx");
- if (File.Exists(pluginPath)) return pluginPath;
- }
- string appDir = AppDomain.CurrentDomain.BaseDirectory;
- return Path.Combine(appDir, "caxa3dManagermodle.xlsx");
+ // 模板随插件分发，只能用 Host 注入的插件目录定位（AppDomain.BaseDirectory 是 CAXA bin）
+ if (string.IsNullOrEmpty(_pluginDirectory)) return null;
+ return Path.Combine(_pluginDirectory, "caxa3dManagermodle.xlsx");
  }
 
  private void AutoLoadDefaultTable()
  {
  string defaultPath = GetDefaultTablePath();
- if (File.Exists(defaultPath))
+ if (!string.IsNullOrEmpty(defaultPath) && File.Exists(defaultPath))
  {
  AddLog(" 检测到默认表格文件，自动加载中...");
  LoadTable(defaultPath);
  }
  else
  {
- AddLog($" 默认表格文件不存在: {defaultPath}");
+ AddLog($" 默认表格文件不存在: {defaultPath ?? "(插件目录未知)"}");
  AddLog(" 请手动点击「选择表格」按钮加载表格文件");
  }
  }
@@ -377,7 +372,9 @@ namespace caxa3dAttributeManageraddin
  {
  using (var ofd = new OpenFileDialog())
  {
- ofd.InitialDirectory = Path.GetDirectoryName(GetDefaultTablePath());
+ string defaultPath = GetDefaultTablePath();
+ if (!string.IsNullOrEmpty(defaultPath))
+ ofd.InitialDirectory = Path.GetDirectoryName(defaultPath);
  ofd.Filter = "Excel文件 (*.xlsx)|*.xlsx|所有文件 (*.*)|*.*";
  if (ofd.ShowDialog() == DialogResult.OK)
  {

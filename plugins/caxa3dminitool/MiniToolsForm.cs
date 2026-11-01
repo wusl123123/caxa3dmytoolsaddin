@@ -12,11 +12,11 @@ namespace caxa3dminitool
 {
     /// <summary>
     /// 小工具合集主窗口：
-    ///  - 顶部「窗口前置」是 TopMost 开关（默认锁定在最上层）；
-    ///  - 增料/除料切换：选中特征后一键在增料/除料之间切换，并重建所属零件；
-    ///  - 实时显示「当前设计环境.ics---零部件名（虚拟 / 外部链接）」；
-    ///  - 日志区 + 保存/清理日志。
-    /// 所有成功判定只看业务侧回读（OperationType 是否真的变成目标值）。
+    ///  - 顶部「窗口前置」是 TopMost 开关（默认锁定在最上层），右侧显示当前选中；
+    ///  - 主体与主工具箱同款四列表格：单元格即一个工具，单击（或 Enter/Space）执行；
+    ///    列 = 工具分类，行 = 分组内序号，列宽按最长文字实测，不折行、不缩字号；
+    ///  - 日志区显示每一步的业务回读结果。
+    /// 所有成功判定只看业务侧回读（OperationType / KernelType / IncludedInBOM 等是否真的变了）。
     /// </summary>
     [ComVisible(false)]
     internal sealed class MiniToolsForm : Form
@@ -25,28 +25,55 @@ namespace caxa3dminitool
 
         private bool _topMost = true;
         private Button _btnTopMost;
-        private Button _btnToggle;
         private Label _lblSelection;
         private Timer _selTimer;
         private const string BaseTitle = "CAXA3D小工具合集";
 
-        // ---- 内核切换 ----
-        private Button _btnKernelPara;
-        private Button _btnKernelAcis;
-        private Timer _kernelTimer;
+        // ---- 工具表格 ----
+        private DataGridView _grid;
+        private readonly Dictionary<int, ToolEntry> _cellTools = new Dictionary<int, ToolEntry>();
+        private DataGridViewCell _hoverCell;
 
-        // ---- 元素工具（压缩 / 包围盒 / 内部链接） ----
-        private Button _btnFindSuppressed;
-        private Button _btnResetBox;
-        private Button _btnSelectLinked;
+        private const int ColCount = 4;
+        private const int CellPaddingX = 12;
+        private const int RowHeight = 36;
+        private const int HeaderHeight = 38;
+        private const int MinColumnWidth = 170;
+        private const int BodyPadding = 12;
+        private const int TopPanelHeight = 70;
+        private const int LogHeight = 180;
 
-        private Button _btnImportWire;
-        private Button _btnAnchorToCog;
-        private Button _btnGetPoint;
-        private Button _btnAddToBom;
+        private static readonly string[] ColumnTitles =
+        {
+            "1. 特征与内核",
+            "2. 元素处理",
+            "3. 几何与坐标",
+            "4. 数据与BOM"
+        };
+
+        private static readonly Color BtnAccent  = Color.FromArgb(0, 120, 212);
+        private static readonly Color HeaderBack = Color.FromArgb(238, 243, 250);
+        private static readonly Color HeaderFore = Color.FromArgb(0, 90, 158);
+        private static readonly Color CellBack   = Color.White;
+        private static readonly Color HoverBack  = Color.FromArgb(229, 241, 251);
+        private static readonly Color GridLine   = Color.FromArgb(210, 210, 210);
+        private static readonly Color CellFore   = Color.FromArgb(30, 30, 30);
+        private static readonly Color EmptyCellBack = Color.FromArgb(248, 248, 248);
+
+        private static readonly Font CellFont   = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular);
+        private static readonly Font HeaderFont = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
+
+        /// <summary>单元格里的一个工具：标题 + 悬停说明 + 执行体。</summary>
+        private sealed class ToolEntry
+        {
+            public string Title;
+            public string Tip;
+            public Action Run;
+        }
 
         private TextBox _txtLog;
         private List<IZElement> _kernelQueue;
+        private Timer _kernelTimer;
         private List<IZElement> _kernelChanged;
         private int _kernelIndex;
         private int _kernelTotal;
@@ -76,94 +103,61 @@ namespace caxa3dminitool
         private void BuildUi()
         {
             Text = BaseTitle + "-" + BuildStamp();
-            ClientSize = new Size(900, 458);
-            MinimumSize = new Size(860, 440);
             MaximizeBox = true;
             StartPosition = FormStartPosition.CenterScreen;
+            BackColor = Color.FromArgb(245, 245, 245);
             Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
 
             // ---- 顶部：窗口前置 + 当前选中 ----
-            Panel top = new Panel { Dock = DockStyle.Top, Height = 70, Padding = new Padding(10, 8, 10, 4) };
+            Panel top = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = TopPanelHeight,
+                Padding = new Padding(10, 8, 10, 4),
+                BackColor = Color.White
+            };
 
-            _btnTopMost = MakeButton("窗口前置", 10, 12, 100, 30);
+            _btnTopMost = new Button
+            {
+                Text = "窗口前置",
+                Left = 10, Top = 12, Width = 100, Height = 30,
+                BackColor = BtnAccent, ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Microsoft YaHei UI", 9F)
+            };
+            _btnTopMost.FlatAppearance.BorderSize = 0;
             _btnTopMost.Click += (s, e) => ToggleTopMost();
             top.Controls.Add(_btnTopMost);
 
             _lblSelection = new Label
             {
                 Text = "当前选中：读取中…",
-                Left = 120, Top = 8, Width = 770, Height = 44,
+                Left = 120, Top = 8, Width = 900, Height = 44,
                 AutoSize = false,
                 AutoEllipsis = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
                 Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(0, 90, 170)
             };
             top.Controls.Add(_lblSelection);
 
-            // ---- 按钮行：全部平铺，不再分小控件 ----
-            Panel tool = new Panel { Dock = DockStyle.Top, Height = 58, Padding = new Padding(10, 6, 10, 6) };
+            // ---- 主体：与主工具箱同款四列表格（单元格 = 工具） ----
+            Panel body = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(BodyPadding),
+                BackColor = Color.FromArgb(245, 245, 245)
+            };
+            _grid = BuildGrid();
+            body.Controls.Add(_grid);
 
-            _btnToggle = MakeButton("增料除料切换", 10, 8, 168, 40);
-            _btnToggle.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-            _btnToggle.Click += (s, e) => ToggleSelectedFeature();
-            tool.Controls.Add(_btnToggle);
-
-            _btnKernelPara = MakeButton("切换Parasolid内核", 186, 8, 168, 40);
-            _btnKernelPara.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-            _btnKernelPara.Click += (s, e) => StartKernelSwitch(eZKernelType.Z_KERNEL_PARASOLID);
-            tool.Controls.Add(_btnKernelPara);
-
-            _btnKernelAcis = MakeButton("切换ACIS内核", 362, 8, 168, 40);
-            _btnKernelAcis.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-            _btnKernelAcis.Click += (s, e) => StartKernelSwitch(eZKernelType.Z_KERNEL_ACIS);
-            tool.Controls.Add(_btnKernelAcis);
-
-            Panel tool2 = new Panel { Dock = DockStyle.Top, Height = 58, Padding = new Padding(10, 6, 10, 6) };
-
-            _btnFindSuppressed = MakeButton("选中取消压缩", 10, 8, 168, 40);
-            _btnFindSuppressed.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-            _btnFindSuppressed.Click += (s, e) => UnsuppressSelectedElements();
-            tool2.Controls.Add(_btnFindSuppressed);
-
-            _btnResetBox = MakeButton("更新包围盒", 186, 8, 168, 40);
-            _btnResetBox.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-            _btnResetBox.Click += (s, e) => ResetSizeBoxes();
-            tool2.Controls.Add(_btnResetBox);
-
-            _btnSelectLinked = MakeButton("全选内部链接零件", 362, 8, 180, 40);
-            _btnSelectLinked.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-            _btnSelectLinked.Click += (s, e) => SelectInternalLinkedParts();
-            tool2.Controls.Add(_btnSelectLinked);
-
-            Panel tool3 = new Panel { Dock = DockStyle.Top, Height = 58, Padding = new Padding(10, 6, 10, 6) };
-
-            _btnImportWire = MakeButton("导入3D曲线坐标数据", 10, 8, 192, 40);
-            _btnImportWire.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-            _btnImportWire.Click += (s, e) => ImportWireFromTxt();
-            tool3.Controls.Add(_btnImportWire);
-
-            _btnAnchorToCog = MakeButton("锚点移至重心", 214, 8, 180, 40);
-            _btnAnchorToCog.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-            _btnAnchorToCog.Click += (s, e) => MoveAnchorToCog();
-            tool3.Controls.Add(_btnAnchorToCog);
-
-            _btnGetPoint = MakeButton("获取点坐标", 406, 8, 168, 40);
-            _btnGetPoint.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-            _btnGetPoint.Click += (s, e) => ShowPickedPointCoordinates();
-            tool3.Controls.Add(_btnGetPoint);
-
-            _btnAddToBom = MakeButton("将零部件添加到BOM", 586, 8, 190, 40);
-            _btnAddToBom.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-            _btnAddToBom.Click += (s, e) => AddSelectedToBom();
-            tool3.Controls.Add(_btnAddToBom);
-
-            Controls.Add(tool3);
-            Controls.Add(tool2);
-            Controls.Add(tool);
-            Controls.Add(top);
-
-            // ---- 日志区（Dock Bottom，剩余空间全给日志） ----
-            Panel logHost = new Panel { Dock = DockStyle.Bottom, Height = 180, Padding = new Padding(10, 0, 10, 10) };
+            // ---- 日志区（Dock Bottom，剩余空间给表格） ----
+            Panel logHost = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = LogHeight,
+                Padding = new Padding(10, 0, 10, 10)
+            };
             _txtLog = new TextBox
             {
                 Dock = DockStyle.Fill,
@@ -175,19 +169,249 @@ namespace caxa3dminitool
                 Font = new Font("Consolas", 9F)
             };
             logHost.Controls.Add(_txtLog);
+
+            Controls.Add(body);
             Controls.Add(logHost);
+            Controls.Add(top);
+
+            FillTable();
+            ApplyTableSize();
 
             _selTimer = new Timer { Interval = 2000 };
             _selTimer.Tick += (s, e) => RefreshSelectionLabel();
 
-            // 内核切换：定时器分片处理，保证界面可响应、停止按钮可用
+            // 内核切换：定时器分片处理，保证界面可响应、表格可用停止
             _kernelTimer = new Timer { Interval = 60 };
             _kernelTimer.Tick += (s, e) => OnKernelTimerTick();
         }
 
-        private Button MakeButton(string text, int left, int top, int width, int height)
+        private DataGridView BuildGrid()
         {
-            return new Button { Text = text, Left = left, Top = top, Width = width, Height = height };
+            DataGridView grid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToOrderColumns = false,
+                AllowUserToResizeColumns = false,
+                AllowUserToResizeRows = false,
+                RowHeadersVisible = false,
+                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
+                ColumnHeadersHeight = HeaderHeight,
+                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single,
+                CellBorderStyle = DataGridViewCellBorderStyle.Single,
+                BorderStyle = BorderStyle.FixedSingle,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                MultiSelect = false,
+                EditMode = DataGridViewEditMode.EditProgrammatically,
+                StandardTab = true,
+                ShowCellToolTips = true,
+                BackgroundColor = CellBack,
+                GridColor = GridLine,
+                EnableHeadersVisualStyles = false,
+                Font = CellFont,
+                ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Font = HeaderFont,
+                    Alignment = DataGridViewContentAlignment.MiddleCenter,
+                    BackColor = HeaderBack,
+                    ForeColor = HeaderFore,
+                    SelectionBackColor = HeaderBack,
+                    SelectionForeColor = HeaderFore,
+                    WrapMode = DataGridViewTriState.False
+                },
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Font = CellFont,
+                    WrapMode = DataGridViewTriState.False,
+                    Alignment = DataGridViewContentAlignment.MiddleLeft,
+                    Padding = new Padding(CellPaddingX, 0, CellPaddingX, 0),
+                    BackColor = CellBack,
+                    ForeColor = CellFore,
+                    SelectionBackColor = HoverBack,
+                    SelectionForeColor = CellFore
+                }
+            };
+            grid.RowTemplate.Height = RowHeight;
+
+            for (int c = 0; c < ColumnTitles.Length; c++)
+            {
+                grid.Columns.Add(new DataGridViewTextBoxColumn
+                {
+                    HeaderText = ColumnTitles[c],
+                    Name = "col" + c,
+                    ReadOnly = true,
+                    SortMode = DataGridViewColumnSortMode.NotSortable,
+                    AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                    MinimumWidth = MinColumnWidth
+                });
+            }
+
+            grid.CellClick += Grid_CellClick;
+            grid.CellMouseEnter += Grid_CellMouseEnter;
+            grid.CellMouseLeave += Grid_CellMouseLeave;
+            grid.KeyDown += Grid_KeyDown;
+            return grid;
+        }
+
+        /// <summary>四列工具清单：列 = 分类，行 = 组内序号。</summary>
+        private List<ToolEntry>[] BuildToolGroups()
+        {
+            return new[]
+            {
+                // 1. 特征与内核
+                new List<ToolEntry>
+                {
+                    new ToolEntry { Title = "增料除料切换", Tip = "选中特征后一键在增料/除料之间切换，并重建所属零件", Run = ToggleSelectedFeature },
+                    new ToolEntry { Title = "切换Parasolid内核", Tip = "把选中的零件/整棵树切到 Parasolid 内核", Run = () => StartKernelSwitch(eZKernelType.Z_KERNEL_PARASOLID) },
+                    new ToolEntry { Title = "切换ACIS内核", Tip = "把选中的零件/整棵树切到 ACIS 内核", Run = () => StartKernelSwitch(eZKernelType.Z_KERNEL_ACIS) }
+                },
+                // 2. 元素处理
+                new List<ToolEntry>
+                {
+                    new ToolEntry { Title = "选中取消压缩", Tip = "按装配体穿透规则抓零部件，逐个解除压缩并回读确认", Run = UnsuppressSelectedElements },
+                    new ToolEntry { Title = "更新包围盒", Tip = "对选中元素（无选中则全树）重置 IZSizeBox", Run = ResetSizeBoxes },
+                    new ToolEntry { Title = "全选内部链接零件", Tip = "扫描树中内部链接零件并加入选区", Run = SelectInternalLinkedParts }
+                },
+                // 3. 几何与坐标
+                new List<ToolEntry>
+                {
+                    new ToolEntry { Title = "锚点移至重心", Tip = "把定位锚移到零件重心，几何不动", Run = MoveAnchorToCog },
+                    new ToolEntry { Title = "获取点坐标", Tip = "读取选中点的全局/体坐标（毫米），首个点复制到剪贴板", Run = ShowPickedPointCoordinates }
+                },
+                // 4. 数据与BOM
+                new List<ToolEntry>
+                {
+                    new ToolEntry { Title = "导入3D曲线坐标数据", Tip = "选 txt（每行 X Y Z 毫米）生成插值样条", Run = ImportWireFromTxt },
+                    new ToolEntry { Title = "将零部件添加到BOM", Tip = "把选中零部件全部纳入 BOM 并回读 IncludedInBOM", Run = AddSelectedToBom }
+                }
+            };
+        }
+
+        /// <summary>把工具按分类填入四列表格；空单元格留白并置灰底。</summary>
+        private void FillTable()
+        {
+            List<ToolEntry>[] groups = BuildToolGroups();
+            int rowCount = 1;
+            foreach (List<ToolEntry> list in groups)
+                rowCount = Math.Max(rowCount, list.Count);
+
+            for (int r = 0; r < rowCount; r++)
+                _grid.Rows.Add();
+
+            for (int c = 0; c < ColCount && c < groups.Length; c++)
+            {
+                List<ToolEntry> list = groups[c];
+                for (int r = 0; r < rowCount; r++)
+                {
+                    DataGridViewCell cell = _grid.Rows[r].Cells[c];
+                    if (r < list.Count)
+                    {
+                        ToolEntry tool = list[r];
+                        cell.Value = tool.Title;
+                        cell.ToolTipText = tool.Tip;
+                        _cellTools[r * ColCount + c] = tool;
+                    }
+                    else
+                    {
+                        cell.Value = string.Empty;
+                        cell.Style.BackColor = EmptyCellBack;
+                        cell.Style.SelectionBackColor = EmptyCellBack;
+                    }
+                }
+            }
+        }
+
+        /// <summary>按实测文字宽度定列最小宽与窗口尺寸：文字不折行、不缩字号、不被遮挡。</summary>
+        private void ApplyTableSize()
+        {
+            int totalMin = 0;
+            for (int c = 0; c < ColCount; c++)
+            {
+                int need = TextRenderer.MeasureText(ColumnTitles[c], HeaderFont).Width + CellPaddingX * 2 + 24;
+                foreach (KeyValuePair<int, ToolEntry> pair in _cellTools)
+                {
+                    if (pair.Key % ColCount != c) continue;
+                    int w = TextRenderer.MeasureText(pair.Value.Title, CellFont).Width + CellPaddingX * 2 + 24;
+                    if (w > need) need = w;
+                }
+                if (need < MinColumnWidth) need = MinColumnWidth;
+                _grid.Columns[c].MinimumWidth = need;
+                totalMin += need;
+            }
+
+            int rowCount = Math.Max(1, _grid.Rows.Count);
+            int gridHeight = HeaderHeight + rowCount * RowHeight + BodyPadding * 2 + 12;
+            int clientWidth = Math.Max(900, totalMin + 48);
+            ClientSize = new Size(clientWidth, TopPanelHeight + gridHeight + LogHeight + 8);
+            MinimumSize = new Size(clientWidth + 16, TopPanelHeight + gridHeight + LogHeight);
+        }
+
+        private void Grid_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            RunCell(e.RowIndex, e.ColumnIndex);
+        }
+
+        private void Grid_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter && e.KeyCode != Keys.Space) return;
+            DataGridViewCell cell = _grid.CurrentCell;
+            if (cell == null) return;
+            RunCell(cell.RowIndex, cell.ColumnIndex);
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+
+        private void Grid_CellMouseEnter(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            if (!_cellTools.ContainsKey(e.RowIndex * ColCount + e.ColumnIndex)) return;
+            _hoverCell = _grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            _hoverCell.Style.BackColor = HoverBack;
+            _grid.Cursor = Cursors.Hand;
+        }
+
+        private void Grid_CellMouseLeave(object sender, DataGridViewCellEventArgs e)
+        {
+            if (_hoverCell != null)
+            {
+                _hoverCell.Style.BackColor = Color.Empty;
+                _hoverCell = null;
+            }
+            _grid.Cursor = Cursors.Default;
+        }
+
+        /// <summary>执行单元格对应的工具：内核切换进行中只提示、不重入。</summary>
+        private void RunCell(int row, int column)
+        {
+            ToolEntry tool;
+            if (!_cellTools.TryGetValue(row * ColCount + column, out tool)) return;
+
+            if (_kernelRunning)
+            {
+                Diagnostics.Log("[未执行] 内核切换进行中，请稍后再试。（" + tool.Title + "）");
+                return;
+            }
+
+            try
+            {
+                Diagnostics.Log("---- 执行：" + tool.Title + " ----");
+                tool.Run();
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.Log("执行 " + tool.Title + " 失败：" + ex);
+            }
+        }
+
+        /// <summary>长任务期间禁用表格，避免重复点击（内核切换由分片定时器输出，不受影响）。</summary>
+        private void SetToolsEnabled(bool enabled)
+        {
+            if (_grid != null && !_grid.IsDisposed) _grid.Enabled = enabled;
+            if (_grid != null) _grid.Cursor = enabled ? Cursors.Default : Cursors.WaitCursor;
         }
 
         private static string BuildStamp()
@@ -275,7 +499,7 @@ namespace caxa3dminitool
                 return;
             }
 
-            _btnAnchorToCog.Enabled = false;
+            SetToolsEnabled(false);
             try
             {
                 string error, summary;
@@ -313,7 +537,7 @@ namespace caxa3dminitool
             }
             finally
             {
-                _btnAnchorToCog.Enabled = true;
+                SetToolsEnabled(true);
             }
         }
 
@@ -330,7 +554,7 @@ namespace caxa3dminitool
                 return;
             }
 
-            _btnAddToBom.Enabled = false;
+            SetToolsEnabled(false);
             try
             {
                 string error, summary;
@@ -361,7 +585,7 @@ namespace caxa3dminitool
             }
             finally
             {
-                _btnAddToBom.Enabled = true;
+                SetToolsEnabled(true);
             }
         }
 
@@ -379,7 +603,7 @@ namespace caxa3dminitool
                 return;
             }
 
-            _btnGetPoint.Enabled = false;
+            SetToolsEnabled(false);
             try
             {
                 string error, summary;
@@ -436,7 +660,7 @@ namespace caxa3dminitool
             }
             finally
             {
-                _btnGetPoint.Enabled = true;
+                SetToolsEnabled(true);
             }
         }
 
@@ -490,7 +714,7 @@ namespace caxa3dminitool
 
         private void ToggleSelectedFeature()
         {
-            _btnToggle.Enabled = false;
+            SetToolsEnabled(false);
             try
             {
                 string error;
@@ -541,7 +765,7 @@ namespace caxa3dminitool
             }
             finally
             {
-                _btnToggle.Enabled = true;
+                SetToolsEnabled(true);
             }
         }
 
@@ -572,8 +796,7 @@ namespace caxa3dminitool
             _kernelStopRequested = false;
             _kernelRunning = true;
 
-            _btnKernelPara.Enabled = false;
-            _btnKernelAcis.Enabled = false;
+            SetToolsEnabled(false);
 
             _kernelTimer.Start();
         }
@@ -645,8 +868,7 @@ namespace caxa3dminitool
         {
             _kernelRunning = false;
             _kernelTimer.Stop();
-            _btnKernelPara.Enabled = true;
-            _btnKernelAcis.Enabled = true;
+            SetToolsEnabled(true);
 
             int confirmed = 0, mismatch = 0;
             try

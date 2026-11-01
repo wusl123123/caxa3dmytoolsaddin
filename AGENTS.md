@@ -27,7 +27,7 @@ CAXA 3D **集合体 Add-in**：CAXA 里只登记一个 `caxa3dmytoolsaddin`，�
 ## 2. 构建 / 部署 / 打包（只有这四个入口）
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1     # 契约 -> 9 个子插件 -> 主程序 -> 汇总 src\plugins
+powershell -ExecutionPolicy Bypass -File build.ps1     # 契约 -> 独立工具 EXE -> 11 个子插件 -> 主程序 -> 汇总 src\plugins
 安装.bat                                                # 部署（自动提权，扫描本机所有 CAXA 3D 版本）
 卸载.bat                                                # 手术式移除四个登记点，不还原 .bak
 打包.bat                                                # dist\caxa3dmytoolsaddin-<版本>.zip（无源码）
@@ -56,7 +56,8 @@ caxa3dmytoolsaddin/
 ├── src/Contracts/        IPlugin / IPluginHost 契约（不引用任何 CAXA 类型）
 ├── src/Host/             主程序（唯一带内嵌 SxS 清单的程序集）
 ├── src/plugins/          插件编译产物汇总（构建生成，勿手改）
-└── plugins/<插件>/        各插件独立解决方案（9 个，可单独打开）
+├── plugins/<插件>/        各插件独立解决方案（11 个，可单独打开）
+└── tools/caxa3didcskill/  独立 EXE 源码（进程清理，规则 16.6 要求进程外，不由 Host 加载）
 ```
 
 ```
@@ -66,7 +67,11 @@ C:\Program Files\CAXA\CAXA 3D\<年份>\bin\
 └── caxa3dmytoolsaddin\plugins\<插件Id>\<插件Id>.dll
 ```
 
-现有插件 Id：`Caxa3dcudeaddin`、`caxa3dAttributeManageraddin`、`caxa3dcodenameextraction`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3didcskill`、`caxa3dminitool`、`caxa3dsheetmaster`、`caxa3dexbtest`。
+现有插件 Id（11 个）：`Caxa3dcudeaddin`、`caxa3dAttributeManageraddin`、`caxa3dcodenameextraction`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dminitool`、`caxa3dsheetmaster`、`caxa3dexbtest`、`caxa3dapigetaddin`、`caxa3didcskill`、`caxa3dCXDFTViewUpdate`。
+
+主工具箱窗口按 `IPlugin.Category` 分三列表格：`1. 常用插件`（`BuiltIn`）/ `2. 独立插件`（`Independent`）/ `3. 测试插件`（`Test`）。当前常用列（6）：`caxa3dcodenameextraction`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dminitool`、`caxa3dsheetmaster`、`caxa3dCXDFTViewUpdate`；测试列（4）：`Caxa3dcudeaddin`、`caxa3dAttributeManageraddin`、`caxa3dexbtest`、`caxa3dapigetaddin`；独立列（1）：`caxa3didcskill`（后台进程清理）。
+
+独立工具接入方式（唯一范式）：`plugins\caxa3didcskill\` 是**启动器 DLL**（`Category=Independent`，不引用 interop、不建窗口、不实现任何业务逻辑，`Activate()` 只做「同目录 EXE 存在→单实例前台化/启动」），真正干活的是 `tools\caxa3didcskill\caxa3didcskill.exe`。两者随包部署到同一目录 `<CAXA bin>\caxa3dmytoolsaddin\plugins\caxa3didcskill\`。禁止把进程清理逻辑写回进程内插件（规则 16.6）。
 
 ---
 
@@ -104,8 +109,8 @@ C:\Program Files\CAXA\CAXA 3D\<年份>\bin\
 1. `plugins/<插件>/` 保留独立解决方案，入口改为 `Plugin.cs` 实现 `IPlugin`。
 2. 删除原 `Addin.cs` / `Program.cs`（残留 `[ComVisible(true)]`、`[Guid]`、`[ProgId]` 会污染 Host 清单）。
 3. 删除 Ribbon / ControlBar 注册、`Icons`、`ConvertImage.cs`、`stdole` 引用；图标参数传 `null, null`。
-4. `build.ps1` 的 `$plugins` 加一项；需要额外资源时补 `Extra` 扩展名。
-5. `package.ps1` 白名单补扩展名；若来自独立 Add-in，`deploy.ps1` 的 legacy 清单补旧 DLL / 目录 / CLSID。
+4. `build.ps1` 的 `$plugins` 加一项；需要额外资源时补 `Extra` 扩展名；产物不在本工程输出目录的（如独立 EXE）用 `ExtraSrc` 指明源路径，暂存缺失会直接抛错。
+5. `package.ps1` 白名单补扩展名（`.exe` 已在白名单内）；若来自独立 Add-in，`deploy.ps1` 的 legacy 清单补旧 DLL / 目录 / CLSID；独立 EXE 类工具还要在 `package.ps1` 缺件校验、`deploy.ps1` 的 `[3c/5]` 落位校验、`restore.ps1` 的清理与残留校验三处同步登记。
 6. 首次即建 `plugins/<插件>/<插件>-项目总结.md`。
 7. 主程序不改。
 
@@ -116,7 +121,8 @@ C:\Program Files\CAXA\CAXA 3D\<年份>\bin\
 ## 7. 日志与取证
 
 - 主程序：`%TEMP%\caxa3dmytoolsaddin_trace.log`（每次启动清空）。
-- 子插件：`%TEMP%\<插件Id>_trace.log`（9 个插件各自一份，命名即插件 Id）。
+- 子插件：`%TEMP%\<插件Id>_trace.log`（9 个业务插件各自一份，命名即插件 Id；`caxa3didcskill` 启动器不建自己的日志文件，只写 Host 主日志）。
+- 独立工具：`%TEMP%\caxa3didcskill_trace.log`（`tools\caxa3didcskill`）。
 - 关键判据必须写**文件日志**；`AddLog` 类只进 UI 的步骤日志不算证据。
 - 专项证据统一归档 `C:\code\ICAPI\_probe-tools\out\<项目名>\`（`probe_*.txt` / `trace_*.log` / `user_*.txt`），**不要散在桌面或 `%TEMP%`**；归档最小集 = 探针报告 + 全量 trace + 被质疑那批 DLL 指纹（大小/mtime/SHA256）。
 - 用户报「数据抓错了」时排查顺序：①trace 里有 `set_*` 痕迹 → ②CAXA 里实际加载的 DLL 指纹 → ③最后才 diff 源码（规则坑 114）。
@@ -156,3 +162,5 @@ C:\Program Files\CAXA\CAXA 3D\<年份>\bin\
 - 把契约 DLL 拷进插件目录；让子插件内嵌 SxS 清单；给子插件注册 Ribbon/COM。
 - 依赖「命令名」执行内部命令（`Commands.xml` 有登记 ≠ CRX 命令表里有）。
 - 已否决路线见规则第 23 节（64 条）与第 32 节 E，**永久不再尝试**。
+- 安装/卸载里把「安装根」和「版本目录」放进同一张去重表。注册表 `InstallDir` 指向的是版本目录本身（`<根>\<年份>\`），共用 `$seen` 会让该版本先被记成"已处理的根"，随后扫真根时被跳过 → **整版漏装**（本机曾因此只装 2027、丢掉真实存在的 2024）。必须 `$seenRoot` / `$seenVer` 分离。
+- 装/卸脚本验证只跑单版本或只看"程序没报错"。本机同时装了 2024(26.0) 与 2027(29.0)，**必须两版本都验证**（发现列表、落位、注册表、卸载残留），且模拟根烟测要用 3098/3099 这类假年份隔离真实 `26.0`/`29.0` 键。

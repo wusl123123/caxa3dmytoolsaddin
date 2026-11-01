@@ -19,7 +19,7 @@ namespace Caxa3dcudeaddin
 
         public string DisplayName { get { return "立方体工具"; } }
 
-        public PluginCategory Category { get { return PluginCategory.BuiltIn; } }
+        public PluginCategory Category { get { return PluginCategory.Test; } }
 
         /// <summary>Host 加载插件时调用：保存引用并创建隐藏窗口。</summary>
         public void Initialize(IPluginHost host)

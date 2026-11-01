@@ -14,7 +14,7 @@ param(
     [string]$WorkRoot = ''
 )
 
-$ScriptVersion = '2026-10-22.3'
+$ScriptVersion = '2026-10-31.1'
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = if ($WorkRoot) { $WorkRoot } else { $PSScriptRoot }
@@ -43,11 +43,117 @@ Write-Host ""
 $hostName      = 'caxa3dmytoolsaddin'
 $clsid         = '{6F1A9C24-3B57-4E8D-9A02-5C7D1E8B4F36}'
 $contractsName = 'Caxa3dMyTools.Contracts.dll'
-$caxaRoot      = if ($env:CAXA3D_ROOT) { $env:CAXA3D_ROOT } else { 'C:\Program Files\CAXA\CAXA 3D' }
 
-$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll')
-$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin')
-$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}')
+# 「2. 独立插件」列的后台进程清理工具（启动器 DLL + 进程外 EXE）
+$idcPluginName = 'caxa3didcskill'
+$idcExeName    = 'caxa3didcskill.exe'
+
+# ================================================================ 定位安装位置
+# CAXA 3D 不一定装在 C 盘。探测顺序（全部命中后按「存在 <年份>\bin」校验、去重）：
+#   0) 环境变量 CAXA3D_ROOT（手工指定根目录，最高优先级，命中即不再扫描其余来源）
+#   1) 注册表 HKLM/HKCU\SOFTWARE[+WOW6432Node]\CAXA\CAXA 3D\<ver>\InstallDir
+#      （本机实测值形如 <根>\2027\，即年份版本目录，取其父目录为根）
+#   2) 卸载表 Uninstall\* 中 DisplayName 匹配 CAXA 3D 的 InstallLocation
+#   3) 各固定盘 <盘>:\Program Files\CAXA\CAXA 3D
+#   4) 兜底 C:\Program Files\CAXA\CAXA 3D
+function Test-CaxaRoot([string]$root) {
+    if ([string]::IsNullOrWhiteSpace($root)) { return $false }
+    try {
+        foreach ($v in @(Get-ChildItem $root -Directory -ErrorAction SilentlyContinue)) {
+            if ($v.Name -match '^\d+$' -and (Test-Path (Join-Path $v.FullName 'bin'))) { return $true }
+        }
+    } catch { }
+    return $false
+}
+
+function Get-CaxaRoots {
+    $roots = New-Object System.Collections.Generic.List[string]
+
+    if ($env:CAXA3D_ROOT) {
+        Write-Host ("安装位置来源：环境变量 CAXA3D_ROOT = {0}" -f $env:CAXA3D_ROOT) -ForegroundColor Cyan
+        $roots.Add($env:CAXA3D_ROOT.TrimEnd('\'))
+        return ,$roots
+    }
+
+    # 1) 注册表 InstallDir（HKLM/HKCU 的 64 位与 32 位视图都查）
+    foreach ($base in @('HKLM:\SOFTWARE\CAXA\CAXA 3D',
+                        'HKLM:\SOFTWARE\WOW6432Node\CAXA\CAXA 3D',
+                        'HKCU:\SOFTWARE\CAXA\CAXA 3D',
+                        'HKCU:\SOFTWARE\WOW6432Node\CAXA\CAXA 3D')) {
+        if (-not (Test-Path $base)) { continue }
+        foreach ($k in @(Get-ChildItem $base -ErrorAction SilentlyContinue)) {
+            $dir = $null
+            try { $dir = [string]$k.GetValue('InstallDir') } catch { }
+            if ([string]::IsNullOrWhiteSpace($dir)) { continue }
+            $dir = $dir.TrimEnd('\')
+            if ($dir) { $roots.Add($dir) }                      # InstallDir 本身可能是版本目录
+            $parent = Split-Path -Parent $dir
+            if ($parent) { $roots.Add($parent) }                # 也可能是根目录下某个子层
+        }
+    }
+
+    # 2) 卸载表 InstallLocation（CAXA 3D 实体设计 / 三维数据接口等条目）
+    $unins = @(Get-ItemProperty -Path @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*') -ErrorAction SilentlyContinue)
+    foreach ($u in $unins) {
+        if ($u.DisplayName -and ($u.DisplayName -match 'CAXA') -and $u.InstallLocation) {
+            $loc = ([string]$u.InstallLocation).TrimEnd('\')
+            if ($loc) { $roots.Add($loc) }
+        }
+    }
+
+    # 3) 各固定盘默认安装路径 + 4) 兜底 C 盘
+    foreach ($d in @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
+                     Where-Object { $_.DriveType -eq 'Fixed' })) {
+        $roots.Add((Join-Path $d.Root 'Program Files\CAXA\CAXA 3D'))
+    }
+    $roots.Add('C:\Program Files\CAXA\CAXA 3D')
+
+    return ,$roots
+}
+
+# 把候选根收敛成「已验证的版本目录（<根>\<年份>）」列表，去重保序。
+# 陷阱：根去重与版本去重必须各自记账。注册表 InstallDir 常直接指向 <根>\<年份>，
+# 若两者共用一张表，该版本目录会先被登记成「根」，随后扫描真根时被误判为已处理而漏卸载该版本。
+function Get-CaxaVersionDirs {
+    $versions = @()
+    $seenRoot = @{}
+    $seenVer  = @{}
+    $roots = Get-CaxaRoots
+    foreach ($r in $roots) {
+        if ([string]::IsNullOrWhiteSpace($r)) { continue }
+        $rk = $r.TrimEnd('\').ToLower()
+        if ($seenRoot.ContainsKey($rk)) { continue }
+        $seenRoot[$rk] = $true
+
+        # 情形 A：候选本身就是版本目录（…\<年份>，其下有 bin）→ 直接入列，不再当根往下扫
+        if ((Split-Path -Leaf $r) -match '^\d+$' -and (Test-Path (Join-Path $r 'bin'))) {
+            if (-not $seenVer.ContainsKey($rk)) {
+                $seenVer[$rk] = $true
+                $versions += (Get-Item -LiteralPath $r)
+            }
+            continue
+        }
+
+        # 情形 B：候选是安装根（其下有 <年份>\bin）
+        if (-not (Test-CaxaRoot $r)) { continue }
+        foreach ($v in @(Get-ChildItem -LiteralPath $r -Directory -ErrorAction SilentlyContinue)) {
+            if ($v.Name -notmatch '^\d+$') { continue }
+            if (-not (Test-Path (Join-Path $v.FullName 'bin'))) { continue }
+            $vk = $v.FullName.ToLower()
+            if ($seenVer.ContainsKey($vk)) { continue }
+            $seenVer[$vk] = $true
+            $versions += $v
+        }
+    }
+    return ,@($versions | Sort-Object Name)   # 按版本目录名升序，输出稳定
+}
+
+$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dCXDFTViewUpdate.dll')
+$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dCXDFTViewUpdate')
+$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}')
 
 # ================================================================ 通用工具
 
@@ -207,13 +313,32 @@ if ($running) {
     if ($ans -ne 'y') { exit 1 }
 }
 
-$versions = @(Get-ChildItem $caxaRoot -Directory -ErrorAction SilentlyContinue |
-              Where-Object { (Test-Path (Join-Path $_.FullName 'bin')) -and ($_.Name -match '^\d+$') })
+# ---------- 独立工具进程检查 ----------
+# caxa3didcskill.exe 是进程外工具，正在运行时 EXE 被锁、删不掉；
+# 它只清理 IRONCAD 后台进程，结束它不影响正在使用的 CAXA。
+$idcProc = @(Get-Process -Name 'caxa3didcskill' -ErrorAction SilentlyContinue)
+if ($idcProc.Count -gt 0) {
+    Write-Host "[提示] 独立工具 caxa3didcskill 正在运行，先行结束以便删除 EXE。" -ForegroundColor Yellow
+    try {
+        Stop-Process -Name 'caxa3didcskill' -Force -ErrorAction Stop
+        Start-Sleep -Milliseconds 300
+        Write-Host "      已结束 caxa3didcskill 进程"
+    } catch {
+        Write-Host "      警告：结束独立工具进程失败 -> $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+$versions = Get-CaxaVersionDirs
 if ($versions.Count -eq 0) {
-    Write-Host "[错误] 未在 $caxaRoot 下找到 CAXA 3D 版本目录" -ForegroundColor Red
+    Write-Host "[错误] 未在本机找到 CAXA 3D 安装目录（已查注册表 InstallDir、卸载表、各固定盘 Program Files；" -ForegroundColor Red
+    Write-Host "       如安装在非常规位置，请设置环境变量 CAXA3D_ROOT 指向安装根目录后重试）" -ForegroundColor Red
     Read-Host '按回车退出'
     exit 1
 }
+$foundRoots = @($versions | ForEach-Object { Split-Path -Parent $_.FullName } | Select-Object -Unique)
+Write-Host ("发现 CAXA 3D 安装位置：{0}" -f ($foundRoots -join '  ')) -ForegroundColor Cyan
+Write-Host ("发现版本目录：{0}" -f (($versions | ForEach-Object { $_.Name }) -join ', '))
+Write-Host ""
 
 $hadError = $false
 $allNeedles = @("$hostName.dll", $hostName, $clsid) + $legacyDlls + $legacyNames + $legacyClsids
@@ -244,25 +369,38 @@ foreach ($v in $versions) {
     foreach ($f in $files) {
         if (-not (Remove-FileSafe $f)) { $hadError = $true }
     }
+    # 独立插件列的工具：整目录会被下面这行删掉，这里再兜底清 bin 根目录的散放拷贝
+    if (-not (Remove-FileSafe (Join-Path $caxaBin $idcExeName))) { $hadError = $true }
     if (-not (Remove-DirectorySafe (Join-Path $caxaBin $hostName))) { $hadError = $true }
 
     # ---------- 1b. 图纸环境 CRX 桥（只删本插件条目，绝不整体重写共享清单） ----------
-    $crxName    = 'caxa3dcodenameextraction.crx'
-    $crxDst     = Join-Path (Join-Path $caxaBin 'CAXADraft\bin') $crxName
+    # 顺序不能反：先摘 CxAutorun.cx 登记项，再删 .crx；否则重启 CAXA 会因悬空引用加载失败。
+    $crxNames   = @('caxa3dcodenameextraction.crx', 'caxa3dCXDFTViewUpdate.crx', 'caxa3dapicapture.crx')
+    $crxBinDir  = Join-Path $caxaBin 'CAXADraft\Bin'
     $crxAutorun = Join-Path $caxaBin 'CAXADraft\Modules\CxAutorun.cx'
-    if (-not (Remove-FileSafe $crxDst)) { $hadError = $true }
     if (Test-Path $crxAutorun) {
         try {
             $cx = [IO.File]::ReadAllText($crxAutorun)
-            $line = '  <File Template="ID_DFT_TMPL">' + $crxDst + '</File>'
-            if ($cx.Contains($line)) {
-                [IO.File]::WriteAllText($crxAutorun, $cx.Replace($line, ''), (New-Object System.Text.UTF8Encoding($true)))
+            $changed = $false
+            foreach ($crxName in $crxNames) {
+                # 按文件名整行删除：登记行里的盘符大小写由写入方决定，不能靠字符串精确匹配
+                $pattern = '(?im)^[^\r\n]*' + [regex]::Escape($crxName) + '[^\r\n]*(?:\r?\n|$)'
+                if ([regex]::IsMatch($cx, $pattern)) {
+                    $cx = [regex]::Replace($cx, $pattern, '')
+                    $changed = $true
+                }
+            }
+            if ($changed) {
+                [IO.File]::WriteAllText($crxAutorun, $cx, (New-Object System.Text.UTF8Encoding($true)))
                 Write-Host "      CxAutorun.cx 已移除本插件登记项"
             }
         } catch {
             Write-Host "      警告：CxAutorun.cx 清理异常 -> $($_.Exception.Message)" -ForegroundColor Yellow
             $hadError = $true
         }
+    }
+    foreach ($crxName in $crxNames) {
+        if (-not (Remove-FileSafe (Join-Path $crxBinDir $crxName))) { $hadError = $true }
     }
 
     # ---------- 2. 配置与清单：XML 精确删除 + 正则无条件兜底 ----------
@@ -308,8 +446,31 @@ foreach ($v in $versions) {
 
     if (Test-Path (Join-Path $caxaBin "$hostName.dll")) { $left += "$($v.Name): bin 仍有 $hostName.dll" }
     if (Test-Path (Join-Path $caxaBin $hostName))       { $left += "$($v.Name): bin 仍有插件目录 $hostName" }
-    if (Test-Path (Join-Path $caxaBin 'CAXADraft\bin\caxa3dcodenameextraction.crx')) {
+    if (Test-Path (Join-Path $caxaBin "$hostName\plugins\$idcPluginName")) {
+        $left += "$($v.Name): 仍有独立插件目录 $hostName\plugins\$idcPluginName"
+    }
+    if (Test-Path (Join-Path $caxaBin $idcExeName)) {
+        $left += "$($v.Name): bin 仍有 $idcExeName"
+    }
+    if (@(Get-Process -Name 'caxa3didcskill' -ErrorAction SilentlyContinue).Count -gt 0) {
+        $left += "$($v.Name): 仍有 caxa3didcskill 进程在运行（关掉后重跑）"
+    }
+    if (Test-Path (Join-Path $caxaBin 'CAXADraft\Bin\caxa3dcodenameextraction.crx')) {
         $left += "$($v.Name): CAXADraft\bin 仍有 caxa3dcodenameextraction.crx"
+    }
+    if (Test-Path (Join-Path $caxaBin 'CAXADraft\Bin\caxa3dCXDFTViewUpdate.crx')) {
+        $left += "$($v.Name): CAXADraft\bin 仍有 caxa3dCXDFTViewUpdate.crx"
+    }
+    if (Test-Path (Join-Path $caxaBin 'CAXADraft\Bin\caxa3dapicapture.crx')) {
+        $left += "$($v.Name): CAXADraft\bin 仍有 caxa3dapicapture.crx"
+    }
+    $autorunCheck = Join-Path $caxaBin 'CAXADraft\Modules\CxAutorun.cx'
+    if (Test-Path $autorunCheck) {
+        foreach ($needle in @('caxa3dcodenameextraction.crx', 'caxa3dCXDFTViewUpdate.crx', 'caxa3dapicapture.crx')) {
+            if (Select-String -Path $autorunCheck -Pattern $needle -SimpleMatch -ErrorAction SilentlyContinue) {
+                $left += "$($v.Name): CxAutorun.cx 仍含 $needle"
+            }
+        }
     }
     if (Test-Path $configFile) {
         foreach ($needle in @("$hostName.dll", $clsid) + $legacyDlls + $legacyClsids) {

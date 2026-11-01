@@ -13,6 +13,9 @@ CAXA 3D 2027（x64）内置 Add-in：**带图改名及图号分离**。
 | `Addin.cs` | Add-in 入口（IZAddinServer），注册功能区按钮、隐藏主窗口 |
 | `MainForm.cs` | 主界面 + 重命名主流程 + 等待原语 + 焦点回归 |
 | `CaxaAutomation.cs` | CAXA COM 底层调用（vtable 槽位、选中元素、外部链接、属性、改名、保存） |
+| `SizeBoxTool.cs` | 选中元素包围盒读取（迁自 `caxa3dsizeboxread`；只读，ICAPI 接口直调） |
+| `SheetSizeTool.cs` | 钣金件尺寸填写核心（迁自 `caxa3dsheetsizewrite`：校验/展开件/板厚/回填/默认配置/保存） |
+| `caxa3dsheetsizewriteaddfix.txt` | 尺寸回填规则（SC规格 / SC材料 / 材料字段名），随插件输出 |
 | `CrxBridge.cs` | C# ↔ CRX 文件桥（请求文件 + 日志增量读取 + seq 回执） |
 | `PopupAutoYes.cs` | 后台代点「是/确定」、文件对话框自动填入目标 ics |
 | `caxa3dcodenameextraction-crx/` | CRX 桥工程（CX_open / CX_save / CX_DFT_ViewSave / CX_DFT_ViewClose） |
@@ -89,6 +92,9 @@ CAXA 3D 2027（x64）内置 Add-in：**带图改名及图号分离**。
 | 16 | 2026-10-25 16:3x | 坑点修复 + 流程精简 | **「改名后 exb 打不开」根因=大图纸流是分段块容器**（教训20）：壳体 exb 的 `*Blk` 有 27 段，旧实现只解压第 0 段 → 内容丢失 → 打不开。改为全段解压拼接→按声明长度截断→回写时分块补零（27→27 段）。验证：`*Blk` 仅 +672 字节（7 记录×96），声明 6876908→6877580，记录区外差异仅 16 字节（均为 pathLen/reclen）。另按用户要求**移除流程末尾的「重新生成零部件」**（装配体下极慢），日志 7 步改 6 步，使用说明同步。已生成 `Desktop\对比\直改验证D-壳体.exb` 待实测；本轮部署因 CAXA 运行中锁 DLL 未完成 |
 | 17 | 2026-10-25 18:3x | 坑点修复（定案） | **大图纸直改失败最终定案：多段容器无法仅靠改链接记录复刻官方保存**。对照「原始壳体」与「CAXA 官方改名产物」逐流 diff：官方不只有改 `*Blk`(+24912)，还改 `*GBlock`(+180)、`*SpaceStream`(+6044/186→187条)、`*StyleStream`(-4)、`*DictionaryStream`(+2)；`*Blk` 记录间区域仅 +707 字节，而**末尾区域 +23783 字节**（CAXA 保存时重写尾部明细表/BOM/图纸属性），远超路径增量 7×46=322。另确认 `-12` 字段规则因文件而异：折弯板官方对父级记录也按 delta 平移，壳体官方对父级记录保持不变 → 改为「仅小值（<100000，即 reclen）才平移」。尝试后直改产物仍无法与官方一致，为大图纸不可行的实证 |
 | 18 | 2026-10-25 18:5x | 功能剔除（用户裁定） | **彻底剔除「exb 直改」功能**：删除 `ExbLinkPatcher.cs`（内联直改器）与 `ExbLinkPatch/`（独立诊断工具、`OLE2` COM 互操作全套）；`MainForm` 移除 `_exbPatchEnabled` 字段、`_btnExbPatch` 按钮、`ToggleExbPatch()`/`ApplyExbPatchVisual()`、面板注册、点击绑定、以及流程 4/6 的整段直改分支与 `patchedExb` 收尾提示；步骤 4/6 统一为「打开工程图 → `OpenAndCloseDrawing`」。使用说明删除两处直改描述，改为单一流程。UI 恢复为「规则下拉 + 图号分离开关」一行。已编译（0 错误）并部署。**结论：图纸链接更新只保留老流程一条路径**，exb 格式知识（OLE2/分段容器/记录头/偏移）仅作为取证记录保留在本总结与全局规则中，不再有生产代码引用 |
+| 19 | 2026-10-31 20:0x | 功能合并 | **合并独立工具 `caxa3dsizeboxread`**：新增 `SizeBoxTool.cs`（包围盒读取逻辑原样迁入），主界面「钣金件设计环境设默认」正下方新增「读取最小包围盒」按钮（214,252,200），结果输出到现有日志区；长流程运行期间按钮禁用。详见第 11 节 |
+| 20 | 2026-10-31 20:3x | 功能替换 | **按钮替换为「钣金件尺寸填写」**（用户裁定）：该位置改为合并独立工具 `caxa3dsheetsizewrite` 的核心流程（`SheetSizeTool.cs` + 规则 `caxa3dsheetsizewriteaddfix.txt`），只读按钮与 `ReadBoundingBoxes` 一并移除；`SizeBoxTool.cs` 保留为内部依赖。详见第 11 节 |
+| 21 | 2026-10-31 21:0x | 代码精简（用户裁定） | 依 trace 实证删除从未触发的兜底：`GetExternallyLinkedInfo` 异常不再按虚拟件放过（校验弹错）；板厚只认 `GetStockProperties`（删 `Thickness` 回退与量级纠偏）；`GetFlatPart` 异常不再吞；`SetValueByName` 失败不再回退 `AddCustomProp`（直接抛错）；`Doc.Save` 不再 try/catch 吞错。**同时删除材料来源字段 `MaterialSourceField` 及「读取属性 `<材料>板T=板厚`」整条路径**（规则只取前 2 项，材料统一由 `GetMaterialNameProperty` 提供），消除 trace 中 3 次 `读取属性「<材料>板T=板厚」失败：Unspecified error.` |
 
 ## 6. 交付状态
 - 已完成编译并部署到 `C:\Program Files\CAXA\CAXA 3D\2027`（DLL/PDB、规则/说明 txt、CRX 注册脚本；`IronCad.Addin.config`、`IronCad.exe.manifest`、注册表 Applications 键、`CxAutorun.cx` 均登记，仅追加本插件条目）。4 个配置文件与 `caxa3d2027关键设置\` 截图目录**只随编译输出打包，不进 CAXA 安装目录**（里程碑11）。
@@ -190,3 +196,30 @@ CAXA 3D 2027（x64）内置 Add-in：**带图改名及图号分离**。
 ### 同期小改动
 - 工具箱显示名与 `AssemblyTitle` 去掉「（子插件）」后缀（`Plugin.cs` DisplayName 与同名 `.csproj`）。
 
+
+## 11. 2026-10-31 合并外部工具（最终态：钣金件尺寸填写）
+
+### 需求演进
+1. 先把独立工具 `caxa3dsizeboxread` 的「读取最小包围盒」按钮并入本插件，位置在「钣金件设计环境设默认」正下方（里程碑 19）。
+2. 用户裁定：**该按钮替换为独立工具 `caxa3dsheetsizewrite` 的「钣金件尺寸填写」**，原只读功能不再暴露（里程碑 20）。
+
+### 当前实现
+- `SizeBoxTool.cs`（内部依赖，保留）：从 `caxa3dsizeboxread` 迁入，包围盒口径与实测槽位结论不变：
+  - 零件：`IZPart.GetBody(true)` → `IZBody.GetBoundingBox()`（槽 13）/ `GetTightBoundingBox()`（槽 21），局部 6 值用 `GetTransformToGlobal` + `IZMathPoint.TransformBy`（槽 16）变换 8 角点后再求世界 AABB；
+  - 装配体：`IZAssembly.GetBoundingBox(false)`（槽 53，世界坐标）；兜底 `IZSizeBox.Length/Width/Height`；
+  - 返回 VARIANT 统一按 `minX,minY,minZ,maxX,maxY,maxZ` 解包，兼容 `float[]`/`double[]`/`object[]`/`ZArray`。
+- `SheetSizeTool.cs`：从 `caxa3dsheetsizewrite\SheetSizeTool.cs` 迁入（命名空间改为 `caxa3dcodenameextraction`；`RuleConfig` 改名 `SheetSizeRule`，结果类型加 `SheetSize` 前缀避免歧义）。唯一逻辑改动：`FindFlatPart` 的 5s 等待由 `CaxaAutomation.WaitUntil`（依赖其静态停止标志）改为本地 `WaitFor(condition, timeout, shouldStop)`，与本插件「停止」按钮共用 `_stopRequested`。
+- 规则文件 `caxa3dsheetsizewriteaddfix.txt` 随插件输出（csproj `CopyToOutputDirectory` + `build.ps1` 的 `.txt` Extra 已覆盖），加载顺序：CAXA bin → 插件目录 → 当前目录；只取前 2 个引号值（`SC规格` / `SC材料`），后续行仅作说明，缺失时用内置默认 `SC规格/SC材料`。
+- `MainForm`：按钮 `_btnSheetSize`「钣金件尺寸填写」，位置 `(214, 252, 200)`（原「读取最小包围盒」位置）；`panelBody` 高 314、窗口 `ClientSize` 620、`MinimumSize` 580（与里程碑 19 一致）。
+- 流程：`BtnSheetSize_Click` 先 `SheetSizeTool.Validate`（钣金件 type=20、虚拟件、名称不含「展开」、`文件名=零件名`），不通过弹提示并写日志；通过后走 `RunLongFlow`（禁用其它按钮、启用「停止」与代点、结束统一提示），内部 `SheetSizeTool.Execute`：
+  材料（`GetMaterialNameProperty`）→ 板厚（仅 `GetStockProperties`，mm）→ 找「展开<零件名>」（设计树 → `GetFlatPart` → `Unfold`）→ 紧致盒三维排序（最大=长、次大=宽、最小=厚，最小边须等于板厚 ±0.1mm 否则中止且不写属性）→ 写 `SC规格=长x宽`、`SC材料=<材料>板T=厚`（写后回读）→ Refold + 默认配置激活 → 复核属性 → `Doc.Save()` 并校验文件非空。
+- `r.Saved == false` 时抛异常走「失败」分支，避免「完成」误报。
+
+### 未迁入部分
+原独立窗口及其「停止 / 检查选中 / 窗口前置 / 保存日志 / 清理日志」不迁入——本插件已有统一工具栏与日志区；「停止」复用本插件 `RunLongFlow` 的停止链路。
+
+### 验证状态
+- `dotnet build -c Release -p:Platform=x64`：0 error 0 warning。
+- `build.ps1` 全量构建 + 暂存通过（DLL 与规则 txt 已进 `src\plugins\caxa3dcodenameextraction\`）。
+- `caxa-slot-check.ps1`：MISMATCH 仍为基线 3 处（`SheetMetalOps.cs:66/68/69` 死常量），无新增。
+- CAXA 内实点「钣金件尺寸填写」：**待用户实测**。

@@ -3,15 +3,18 @@ using System;
 namespace Caxa3dMyTools.Contracts
 {
     /// <summary>
-    /// 插件归类，决定主工具窗口把按钮放在「内置插件」还是「独立插件」列。
+    /// 插件归类，决定主工具窗口表格把插件放在哪一列。
     /// </summary>
     public enum PluginCategory
     {
-        /// <summary>内置插件：进程内、依赖 CAXA 站点的工具（默认归类）。</summary>
-        BuiltIn,
+        /// <summary>常用插件（默认归类）：日常业务工具。</summary>
+        BuiltIn = 0,
 
         /// <summary>独立插件：独立 EXE/外部进程方式运行、不依赖站点的工具。</summary>
-        Independent
+        Independent = 1,
+
+        /// <summary>测试插件：验证性、诊断性工具。</summary>
+        Test = 2
     }
 
     /// <summary>
@@ -29,7 +32,7 @@ namespace Caxa3dMyTools.Contracts
         /// <summary>插件显示名（主工具窗口汇总区按钮标题）。</summary>
         string DisplayName { get; }
 
-        /// <summary>插件归类：内置（BuiltIn）或独立（Independent）。</summary>
+        /// <summary>插件归类：常用（BuiltIn）、独立（Independent）或测试（Test）。</summary>
         PluginCategory Category { get; }
 
         /// <summary>

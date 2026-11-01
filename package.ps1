@@ -64,6 +64,19 @@ if ($missing.Count -gt 0) {
 }
 Write-Host ("缺件校验通过：{0} 个插件工程已全部暂存" -f $pluginDirs.Count) -ForegroundColor Green
 
+# ---------- 独立插件（后台进程清理）缺件校验 ----------
+# 「2. 独立插件」列 = 启动器 DLL + 进程外工具 EXE；少了 EXE 时界面照样有按钮，
+# 但点击必定报错 —— 与其上线后才发现，不如打包时直接中止。
+$idcDir = Join-Path $pluginSrc 'caxa3didcskill'
+foreach ($pair in @(
+        @{ Name = 'caxa3didcskill.dll'; Path = (Join-Path $idcDir 'caxa3didcskill.dll') },
+        @{ Name = 'caxa3didcskill.exe'; Path = (Join-Path $idcDir 'caxa3didcskill.exe') })) {
+    if (-not (Test-Path $pair.Path)) {
+        throw ("打包中止：独立插件缺少 {0}（先编译 tools\caxa3didcskill 并重跑 build.ps1）：{1}" -f $pair.Name, $pair.Path)
+    }
+}
+Write-Host "缺件校验通过：独立插件 caxa3didcskill（启动器 DLL + 工具 EXE）" -ForegroundColor Green
+
 # 版本与主窗口标题一致：主程序 DLL 写入时间 yyyyMMddHHmm（编译即自动更新）
 $version = (Get-Item $hostDll).LastWriteTime.ToString('yyyyMMddHHmm')
 $name    = "caxa3dmytoolsaddin-$version"
@@ -111,6 +124,8 @@ CAXA 3D 插件集合体（主程序 + 全部子插件，交付件不含源码）
 说明
   - 本目录所有 .ps1 必须保持单个 UTF-8 BOM（bat 已自动校正）
   - 子插件放在 plugins\<插件名>\ 下，主程序启动时自动扫描加载
+  - 「2. 独立插件」列的后台进程清理是进程外工具：plugins\caxa3didcskill\caxa3didcskill.exe，
+    点击后以独立进程运行，只清理无可见窗口的 IRONCAD 残留进程（不杀带窗口的前台实例）
 "@
 [IO.File]::WriteAllText((Join-Path $stage 'README.txt'), $readme, (New-Object System.Text.UTF8Encoding($true)))
 
@@ -133,4 +148,5 @@ Write-Host "交付内容（解压后）："
 Write-Host "  caxa3dmytoolsaddin.dll"
 Write-Host "  Caxa3dMyTools.Contracts.dll"
 Write-Host "  plugins\<插件名>\<插件名>.dll  (+ 插件自带资源)"
+Write-Host "  plugins\caxa3didcskill\caxa3didcskill.exe  (独立插件列的后台进程清理工具)"
 Write-Host "  deploy.ps1 / restore.ps1 / 安装.bat / 卸载.bat / README.txt"

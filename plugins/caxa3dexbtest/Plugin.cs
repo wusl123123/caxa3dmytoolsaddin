@@ -6,8 +6,7 @@ namespace caxa3dexbtest
 {
     /// <summary>
     /// 子插件入口：由 caxa3dmytoolsaddin 主程序通过反射加载。
-    /// 本插件原为独立 EXE，通过 IRONCAD.Application COM 外部连接 CAXA，
-    /// 不依赖进程内 AddinSite，因此归类为「独立插件」。
+    /// 验证性工具，归类为「测试插件」。
     /// </summary>
     public sealed class ExbTestPlugin : IPlugin
     {
@@ -18,7 +17,7 @@ namespace caxa3dexbtest
 
         public string DisplayName { get { return "图纸环境矩形测试"; } }
 
-        public PluginCategory Category { get { return PluginCategory.Independent; } }
+        public PluginCategory Category { get { return PluginCategory.Test; } }
 
         /// <summary>Host 加载插件时调用：保存引用并创建隐藏窗口。</summary>
         public void Initialize(IPluginHost host)

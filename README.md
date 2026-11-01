@@ -45,10 +45,16 @@ CAXA 3D 内置插件集合体（Add-in Host）与统一工具箱。CAXA 3D 中�
 | `caxa3dcodenameextraction` | 带图改名及图号分离 | 图纸环境 CRX 桥、图号分离、批量改名、弹窗代点 |
 | `caxa3dsetMaterial` | 材料工具 | 材料 / 密度 / 颜色批量设置，色卡与材料资料库 |
 | `caxa3dTreeBom` | 树形BOM | 按装层级构建 BOM 并导出 Excel，合并规则可配 |
-| `caxa3didcskill` | 后台进程清理 | 识别并清理无窗口的 IRONCAD 残留后台进程 |
 | `caxa3dminitool` | 小工具合集 | 曲线、元素、特征、内核等调试类小工具 |
 | `caxa3dsheetmaster` | 折弯管理大师 | 钣金折弯数据管理、K 因子计算 |
+| `caxa3dCXDFTViewUpdate` | 刷新图纸视图 | 批量打开 exb 图纸刷新视图后保存，图纸环境 CRX 桥 + 弹窗代点 + 后台化 |
 | `caxa3dexbtest` | 图纸环境矩形测试 | 图纸环境 CRX 桥接模块接入样例 |
+| `caxa3dapigetaddin` | 操作 API 抓取器 | 实时抓取用户操作对应的 ICAPI 调用，供二次开发参考 |
+| `caxa3didcskill` | 后台进程清理 | 独立插件列启动器，拉起进程外的 `caxa3didcskill.exe` 清理无窗口 IRONCAD 残留进程 |
+
+工具箱窗口按 `IPlugin.Category` 分三列表格排列：`1. 常用插件`（`BuiltIn`，6 个，含 `caxa3dCXDFTViewUpdate`）、`2. 独立插件`（`Independent`，`caxa3didcskill`）、`3. 测试插件`（`Test`，`Caxa3dcudeaddin`、`caxa3dAttributeManageraddin`、`caxa3dexbtest`、`caxa3dapigetaddin`）。
+
+> 独立插件的形态：`plugins\caxa3didcskill\` 里 DLL 只是**启动器**（不引用 ICAPI、不建窗口、不实现业务逻辑），点单元格时由它启动同目录的 `caxa3didcskill.exe`；已有实例则切前台，不重复启动。进程清理只能在进程外做（规则 16.6），EXE 源码在 `tools\caxa3didcskill\`，随安装包一起部署到 `plugins\caxa3didcskill\`。
 
 ---
 
@@ -71,10 +77,15 @@ caxa3dmytoolsaddin/
     ├── caxa3dcodenameextraction/
     ├── caxa3dsetMaterial/
     ├── caxa3dTreeBom/
-    ├── caxa3didcskill/
     ├── caxa3dminitool/
     ├── caxa3dsheetmaster/         含 CRX 桥子工程（C++）
-    └── caxa3dexbtest/             含 CRX 桥子工程（C++）
+    ├── caxa3dCXDFTViewUpdate/      含 CRX 桥子工程（C++, caxa3dCXDFTViewUpdate.crx）
+    ├── caxa3dexbtest/             含 CRX 桥子工程（C++）
+    ├── caxa3dapigetaddin/         含 CRX 桥子工程（C++, caxa3dapicapture.crx）
+    └── caxa3didcskill/            独立插件列启动器（拉起 tools 里的 EXE）
+
+tools/
+└── caxa3didcskill/              独立 EXE：后台进程清理（随包部署到 plugins\caxa3didcskill\）
 ```
 
 运行期布局：
@@ -82,8 +93,9 @@ caxa3dmytoolsaddin/
 ```
 C:\Program Files\CAXA\CAXA 3D\<年份>\bin\
 ├── caxa3dmytoolsaddin.dll         主程序（内嵌 SxS 清单，强名称签名）
-├── Caxa3dMyTools.Contracts.dll    契约
+├── caxa3dMyTools.Contracts.dll    契约
 └── caxa3dmytoolsaddin\plugins\<插件名>\<插件名>.dll
+    └── caxa3didcskill\   caxa3didcskill.dll（启动器）+ caxa3didcskill.exe（进程外工具）
 ```
 
 ---
@@ -121,7 +133,7 @@ plugins\<每个插件>\Lib\ICApiAddin.snk
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-流程：契约 -> 9 个子插件 -> 主程序 -> 清理并重建 `src/plugins/` 暂存目录。
+流程：契约 -> 独立工具 EXE（`tools\caxa3didcskill`）-> 11 个子插件 -> 主程序 -> 清理并重建 `src/plugins/` 暂存目录（独立插件目录里同时落 DLL 与 EXE）。
 
 编译后处理（自动）：主程序剥离 interop 的 `clrClass/clrSurrogate`、重新嵌入清单、`sn -R` 重签；子插件**不做**任何清单处理。
 
@@ -131,7 +143,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 安装.bat
 ```
 
-双击即可，脚本会先复制自身到 `C:\ProgramData\caxa3dmytoolsaddin\` 再提权执行，自动扫描本机所有 CAXA 3D 版本目录并完成四项登记。
+双击即可，脚本会先复制自身到 `C:\ProgramData\caxa3dmytoolsaddin\` 再提权执行，自动探测 CAXA 3D 的实际安装位置（注册表 `InstallDir` → 卸载表 `InstallLocation` → 各固定盘 `Program Files\CAXA\CAXA 3D`，不假设在 C 盘）并完成四项登记。安装在非常规位置时，可设环境变量 `CAXA3D_ROOT` 指向安装根目录强制指定。
 
 ### 3. 卸载
 
@@ -251,7 +263,7 @@ public interface IPluginHost
 CAXA COM 被放到后台线程，或长任务缺少 `Application.DoEvents()` 泵。参考铁律 13。
 
 **后台 IRONCAD 进程抢连接**
-CAXA 常驻若干无窗口后台进程，与前台进程同名。连接前清空同名无窗口进程再抓取，见「后台进程清理」插件。
+CAXA 常驻若干无窗口后台进程，与前台进程同名。连接前清空同名无窗口进程再抓取；迁移后由 `tools\caxa3didcskill\caxa3didcskill.exe` 独立完成（进程内 addin 不做进程清理）。
 
 ---
 

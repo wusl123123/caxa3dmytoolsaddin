@@ -1,76 +1,76 @@
-# caxa3didcskill 项目总结
+# caxa3didcskill 项目总结（独立插件列启动器）
 
-## 项目概述
-独立 C# WinForms 工具，识别并杀死 CAXA 3D 设计环境残留的无窗口后台进程（任务管理器中显示为 "IRONCAD Design Collaboration Suite"），同时严格保护带可见窗口的前台 CAXA 3D 程序。
+> 目录：`plugins\caxa3didcskill\`。这是**启动器**，不是工具本体；工具本体见 [tools\caxa3didcskill\caxa3didcskill-项目总结.md](../../tools/caxa3didcskill/caxa3didcskill-项目总结.md)。
+> 建档 2026-10-31。
 
-## 架构与环境
-- 语言：C#
-- 框架：.NET Framework 4.8
-- 平台：x64（CAXA 3D 为 64 位进程）
-- 界面：WinForms
-- 参考项目：D:\code\ICAPI\addout\Caxa3dcude（独立 exe，能正常链接 CAXA 3D）
+## 1. 定位
 
-## 功能说明
-1. **链接状态区**：
-   - 显示前台 CAXA 3D（带可见窗口的 IRONCAD 进程）是否在运行，运行中显示 "已保护"。
-   - 「刷新状态」按钮：立即检测一次。
-   - 「启动监控」按钮：按输入框设定的分钟间隔定时检测前台状态，再次点击变为「停止监控」。
-   - 监控间隔输入框：默认 15 min，可修改，范围 (0, 1440]。
-   - 程序启动时自动刷新一次状态。
-2. **操作区（横向布局）**：
-   - 手动运行：立即执行一次后台进程清理。
-   - 自动运行：按输入框设定的分钟间隔定时清理；再次点击变为「停止自动」。
-   - 输入框：默认 15 min，可修改，范围 (0, 1440]。
-3. **日志区**：记录运行情况与杀死时间，支持清空和复制。
+主工具箱「2. 独立插件」列的入口。该列自三列表格上线后一直是「（暂无插件）」——因为唯一符合"独立"性质的 `caxa3didcskill` 当时只是仓库里的一个裸 EXE，Host 扫不到、界面里也没有入口。本插件把"进程外工具"接进界面，同时不改动 Host 一行代码。
 
-## 核心实现
-### 后台进程识别与保护（ProcessKiller.cs）
-- 遍历所有 `IRONCAD` 进程。
-- 通过 `EnumWindows` + `GetWindowThreadProcessId` + `IsWindowVisible` + `GetWindowTextLength` 判断进程是否拥有可见且带标题的顶层窗口。
-  - 有可见窗口 → 前台 CAXA 3D → **保护**，不杀。
-  - 无可见窗口 → 后台 "IRONCAD Design Collaboration Suite" → 杀死。
-- 启动 15 秒内的进程不杀，避免误杀正在加载、窗口尚未出现的前台实例。
-- 比 `Process.MainWindowHandle` 更可靠（实测 IRONCAD 窗口偶尔闪断）。
+```
+工具箱点击「后台进程清理」
+  └── caxa3didcskill.dll（本插件，进程内，只做启动）
+        ├── 已有 caxa3didcskill 进程 → ShowWindow(SW_RESTORE) + SetForegroundWindow
+        └── 无进程 → Process.Start(caxa3didcskill.exe, UseShellExecute=true)
+              └── 独立进程内的 MainForm：扫描/保护/清理 IRONCAD 残留后台进程
+```
 
-### 自动运行
-- 使用 `System.Windows.Forms.Timer`，间隔 = 分钟 × 60 × 1000 ms。
-- 运行期间禁用手动运行按钮与输入框，防止并发清理。
+## 2. 为什么必须拆成「DLL 启动器 + 独立 EXE」
 
-### 前台状态监控
-- 独立 `tmrMonitor` 定时器，与自动清理互不影响。
-- 启动时 `MainForm_Load` 自动调用一次 `RefreshLinkStatus`，之后按用户设定间隔（默认 15 min）定时刷新。
-- 监控运行期间锁定监控间隔输入框，停止后恢复可编辑。
+- 规则 16.6 / 第 17 节：进程清理只允许**进程外**。在 CAXA 进程内按进程名杀同名进程有自杀风险，且规则明确要求删除该实现（2026-10-31 已按此迁出）。
+- 但工具箱只认 `IPlugin`（Host 只扫 `plugins\*\*.dll`），裸 EXE 进不了界面。
+- 结论：DLL 负责"接进界面"，EXE 负责"干活"，两者物理同目录、逻辑零耦合。启动器**不引用 `interop.ICApiIronCAD`**、不注册 COM/Ribbon、不建窗口 —— 契约铁律（一个 Add-in / 一个按钮 / 一个清单）全部不受影响。
 
-### 日志
-- `Program.Log` 同时写入 `%TEMP%\caxa3didcskill_trace.log` 和界面日志区（线程安全，UI 用 `BeginInvoke`）。
-- 日志超过 30000 字符时裁剪前半部分，避免内存膨胀。
+## 3. 实现要点
 
-## 遇到的陷阱与注意事项
-1. **后台进程与前台同名**：`IRONCAD Design Collaboration Suite` 实际进程名也是 `IRONCAD.exe`，不能按进程名直接杀，必须用窗口可见性区分。直接 `GetProcessesByName("IRONCAD")` 后全杀会误杀前台 CAXA 3D。
-2. **`Process.MainWindowHandle` 不可靠**：对 IRONCAD 窗口判定偶尔闪断，改用 `EnumWindows` 枚举顶层窗口并校验可见性+标题长度。
-3. **启动保护**：CAXA 3D 启动初期窗口尚未出现，若此时清理会误杀刚启动的前台实例，因此加 15 秒启动保护窗口。
-4. **本程序不监控前台**：仅在链接状态区展示前台是否在运行，不做任何前台进程操作，符合需求 "只杀死无关后台进程"。
-5. **x64 强制**：CAXA 3D 2024+ 为 64 位进程，csproj 中固定 `PlatformTarget=x64`、`Prefer32Bit=false`。
+| 项 | 值 / 做法 |
+| --- | --- |
+| Id | `caxa3didcskill` |
+| DisplayName | `后台进程清理` |
+| Category | `PluginCategory.Independent` → 落在「2. 独立插件」列 |
+| 强名称 | `Lib\ICApiAddin.snk`，token `56647e1eee90f6d4`（与 Host 一致） |
+| 程序集级 | `[assembly: ComVisible(false)]`，DLL 无内嵌清单（不做 mt/sn 后处理） |
+| EXE 解析 | ①`IPluginHost.PluginDirectory\caxa3didcskill.exe` ②启动器 DLL 所在目录 ③逐级向上 6 层找 `tools\caxa3didcskill\bin\x64\Release\net48`（开发期兜底） |
+| 单实例 | 工具自带定时清理，多开会并发清理同一批进程 → 已有实例只前台化，不重复 `Start` |
+| 生命周期 | `Shutdown()` **不结束**外部进程：用户可能正用它的「自动运行」，卸载时才由 `restore.ps1` 结束 |
+| 失败提示 | EXE 缺失时 `Activate()` 抛 `FileNotFoundException`，主窗口统一弹「打开 后台进程清理 失败」，并提示重跑 `安装.bat` |
 
-## 文件清单
-- caxa3didcskill.csproj
-- Program.cs（入口 + 日志）
-- ProcessKiller.cs（进程识别与清理核心）
-- MainForm.cs（界面逻辑）
-- MainForm.Designer.cs（界面布局）
+`Initialize()` 只解析路径 + 写一行日志，**不启动进程**：CAXA 启动阶段不该弹出工具窗口。
 
-## 编译输出
-- bin/Release/net48/win-x64/caxa3didcskill.exe（唯一输出，PE Machine=0x8664）
-- csproj 固定 `RuntimeIdentifier=win-x64`、`PlatformTarget=x64`，不再产出 AnyCPU 版本。
+## 4. 与四个脚本的联动（缺一环就"装了但点不动"）
 
-## 交付说明
-直接运行编译后的 exe 即可，无需安装。日志同时落盘到 `%TEMP%\caxa3didcskill_trace.log`，便于排查。
+| 脚本 | 本插件相关的改动 |
+| --- | --- |
+| `build.ps1` | ①先编译 `tools\caxa3didcskill`（EXE）再编译插件；②`$plugins` 增 `caxa3didcskill`（`Extra=@('.exe')`）；③新增 `ExtraSrc` 机制：把非本工程产出的 EXE 显式补拷进 `src\plugins\caxa3didcskill`，缺件直接 throw |
+| `deploy.ps1` | 插件整目录随 `[3/5]` 拷贝；新增 `[3c/5]` 校验启动器 DLL 与 EXE 同时就位（缺一即 `$hadError`），并清掉早期手工散放在 `<CAXA bin>` 根目录的旧 EXE（避免两份 EXE 各自为政）；部署校验行追加 `独立插件=…/…`、`无散放EXE=…` |
+| `restore.ps1` | 先 `Stop-Process -Name caxa3didcskill`（EXE 在跑就删不掉；只清理 IRONCAD 后台进程，结束它不影响 CAXA），再删插件目录 + bin 根散放 EXE；残留校验追加「独立插件目录 / bin 根 EXE / 进程仍在」三项 |
+| `package.ps1` | 第二道缺件校验：`src\plugins\caxa3didcskill` 必须同时有 `caxa3didcskill.dll` 与 `caxa3didcskill.exe`（否则打包中止——界面有按钮但点击必报错，不能等上线才发现）；`.exe` 已在扩展名白名单内；README 追加独立插件说明 |
 
-## 并入 caxa3dmytoolsaddin 集合体（2026-10-27）
+## 5. 验证（2026-10-31）
 
-- **交付形态变更**：由独立 EXE 改为集合体子插件；当前交付物是 `caxa3didcskill.dll`，不再直接运行 exe。
-- 删除原 `Program.cs` 入口（`Program.Main`）；日志改由插件自包含：`%TEMP%\caxa3didcskill_trace.log` + 界面日志区。
-- 新增 `Plugin.cs → IdcSkillPlugin : IPlugin`：`Initialize` 预建隐藏窗口 / `Activate` 显示 / `Shutdown` 释放；不注册 Ribbon。
-- 主窗口默认 `TopMost=true`（顶部「窗口前置」蓝/灰态开关）；`grpLink`（链接状态区）**隐藏不显示**——集合体铁律 3 规定不显示 CAXA 连接状态；相关代码保留但界面不可见。
-- 进程识别、前台保护、启动 15 秒保护、定时清理逻辑均未改动。
-- 程序集级 `ComVisible(false)`，插件 DLL 不内嵌 SxS 清单；x64 固定不变。
+```powershell
+powershell -ExecutionPolicy Bypass -File build.ps1
+```
+
+1. 编译：0 error；暂存目录 `src\plugins\caxa3didcskill\` = `caxa3didcskill.dll` + `caxa3didcskill.exe` + pdb；DLL token `56647e1eee90f6d4`。
+2. 假宿主冒烟（临时 net48 控制台直接引用启动器 DLL，`IPluginHost` 用桩实现）：
+   - `Id=caxa3didcskill`、`DisplayName=后台进程清理`、`Category=Independent` → 归类列判定为「2. 独立插件」；
+   - `Initialize` 打印 `独立工具已就位：…\caxa3didcskill.exe`；
+   - 先手动起一个实例再 `Activate()`：进程数 1 → 1（未重复启动，走前台化分支）；
+   - 结束全部实例后 `Activate()`：进程数 0 → 1（成功拉起 EXE）；退出码 0。
+3. 槽位检查 `caxa-slot-check.ps1`：174 / OK 124 / MISMATCH 3 / NOTFOUND 0 / UNMAPPED 47 —— 与基线一致（本插件不调用任何 ICAPI）。
+4. 打包：zip 内含 `plugins\caxa3didcskill\caxa3didcskill.dll` + `caxa3didcskill.exe`；缺件校验两行均通过。
+5. 安装/卸载实跑（`CAXA3D_ROOT` 指向临时模拟根，版本目录名取 `3099` → verTag `1101.0`，隔离真实注册表）：安装后 `plugins\caxa3didcskill\` 内 DLL+EXE 就位、bin 根无散放 EXE、`HKCU\...\CAXA 3D 1101.0\Applications\caxa3dmytoolsaddin` 已建；卸载后目录/EXE/注册表/进程零残留，末行「校验通过」。烟测现场（临时目录 + 1101.0 注册表键）已清理。
+
+## 6. 待实测（真机 CAXA）
+
+- CAXA 2027 内点击「后台进程清理」→ 独立 EXE 弹出、日志 `%TEMP%\caxa3didcskill_trace.log` 出现 `启动 v2.0.0.0`。
+- 工具不带 `TopMost` 冲突：工具窗口默认置顶，点击后应压在主工具箱之上（未真机确认）。
+- 双击单元格/回车键两条触发路径（Host 既有逻辑）在本插件上的表现。
+
+## 7. 里程碑
+
+| 日期 | 变更 |
+| --- | --- |
+| 2026-10-31 | 三列表格上线，「独立插件」列空置 |
+| 2026-10-31 | 新建本启动器插件接入独立列；`build/deploy/restore/package` 四脚本同步管理独立工具；离线冒烟 + 模拟根安装/卸载全部通过 |

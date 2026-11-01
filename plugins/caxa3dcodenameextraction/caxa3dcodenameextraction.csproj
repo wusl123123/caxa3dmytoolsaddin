@@ -52,6 +52,7 @@
   <ItemGroup>
     <None Update="caxa3dcodenameextraction图号分离规则.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="caxa3dcodenameextraction使用说明.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="caxa3dsheetsizewriteaddfix.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Dlg3DInfo.ctl-baseline.ini" CopyToOutputDirectory="PreserveNewest" />
     <None Update="ExbLinkPatch.exe" CopyToOutputDirectory="PreserveNewest" />
     <None Update="register-crx.ps1" CopyToOutputDirectory="PreserveNewest" />

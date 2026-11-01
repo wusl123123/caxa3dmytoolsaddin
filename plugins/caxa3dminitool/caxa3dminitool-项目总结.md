@@ -84,10 +84,26 @@ ICM 原条目（同一 ProgID `IPROShapeUtils.ShapeUtils`，本机未注册，�
 - 内核 API：`IZPart.KernelType`（槽 get=11 / put=12，`eZKernelType`：`NOKERNEL=0, ACIS=1, PARASOLID=2, LITE=3`）；新建零件默认内核走 `IZBaseAppOptions.Parts` → `IZPartsOptions.DefaultKernelType`（get=11 / put=12）。官方样例 `ModelingHelperSupport.cpp::ConvertElementKernel` 即 `put_KernelType` + 递归装配 + 最后 `IZSceneDoc.Update()`。
 - CAXA 内核切换 UI 的实际承载者是内置 Add-in `SwitchKernel.dll`（`IronCad.Addin.config` 里 `system=true`，HKCU `Applications\Switch Kernel`），其命令名（`SwitchKernel.All.PK/.AK`、`SwitchKernel.Sel.ACIS`、`SwitchKernel.Selected.PK`、`SwitchKernel.Suppress.*`、`SwitchKernel.loadAllPart`）只存在于 DLL 字符串里，命令表查不到 → 只能走 API。
 
+## 界面形态（2026-10-31：与主工具箱同款四列表格）
+
+- 原三行平铺按钮（10 个）改为 `DataGridView` 四列表格：**列 = 分类，单元格 = 工具，单击（或 Enter/Space）执行**，与主工具箱 `MainToolboxForm` 同一套视觉与交互规则（行高 36/表头 38、`WrapMode=False`、列宽按最长文字实测 `MinimumWidth`、窗口尺寸由此推导、悬停高亮 + 手型光标、空单元格浅灰留白）。
+- 四列分组（3+3+2+2，共 10 个工具，顺序保持历史习惯）：
+  | 列 | 工具 |
+  | --- | --- |
+  | 1. 特征与内核 | 增料除料切换 / 切换Parasolid内核 / 切换ACIS内核 |
+  | 2. 元素处理 | 选中取消压缩 / 更新包围盒 / 全选内部链接零件 |
+  | 3. 几何与坐标 | 锚点移至重心 / 获取点坐标 |
+  | 4. 数据与BOM | 导入3D曲线坐标数据 / 将零部件添加到BOM |
+- 实现要点：
+  - 工具清单集中在 `BuildToolGroups()`（`ToolEntry{Title,Tip,Run}`），加新工具 = 加一行 `ToolEntry`，表格自动扩行；单元格 `ToolTipText` 放悬停说明。
+  - 长任务统一走 `SetToolsEnabled(bool)` 禁用/恢复表格（替代原来逐按钮 `Enabled`），内核切换分片定时器不受影响；`RunCell()` 里再做一次 `_kernelRunning` 重入拦截。
+  - 每次执行前写一行 `---- 执行：<工具名> ----` 便于在 trace 里对齐用户操作。
+- 离屏截图验证（`DrawToBitmap`，构造函数传 `null` 站点即可建窗）：4 列 3 行、列头/单元格无折行无遮挡、空单元格浅灰、日志区正常，0 warning 0 error。
+
 ## 部署说明
 
 1. 双击 `C:\code\ICAPI\caxa3dminitool\bin\x64\Release\net48\安装.bat`（会自动 UAC 提权，脚本会自我复制到 `%ProgramData%\caxa3dminitool` 再运行）。
-2. 启动 CAXA 3D，在功能区看到「小工具合集」按钮；点开窗口后布局：顶部「窗口前置」+ 选中状态条，中部「增料除料切换」，下部日志。
+2. 启动 CAXA 3D，在功能区看到「小工具合集」按钮；点开窗口后布局：顶部「窗口前置」+ 选中状态条，中部为四列工具表格（单击单元格执行），下部日志。
 3. 日志：`%TEMP%\caxa3dminitool_trace.log`。
 4. 卸载双击 `卸载.bat`，会删除 DLL/PDB、配置节点、清单依赖与注册表键，并打印残留检查。
 

@@ -52,8 +52,7 @@ namespace caxa3dAttributeManageraddin
     ///   IZBaseApp:        ActiveDoc = 11
     ///   IZDoc:            get_Name = 11
     ///   IZSceneDoc:       get_SelectionMgr = 27
-    ///   IZSelectionMgr:   GetSelectedElements = 10, SelectionsAvailable = 17,
-    ///                     GetSelectedElementsZArray = 19
+    ///   IZSelectionMgr:   GetSelectedElementsZArray = 19
     ///   IZArray:          Count = 7, Get = 9
     ///   IZElement:        get_Type = 7, get_Name = 9, get_CustomPropMgr = 24,
     ///                     GetCustomPropManager = 42
@@ -77,8 +76,7 @@ namespace caxa3dAttributeManageraddin
         private const int SlotActiveDoc = 11;            // IZBaseApp
         private const int SlotDocGetName = 11;           // IZDoc
         private const int SlotSceneSelectionMgr = 27;    // IZSceneDoc::get_SelectionMgr -> IZSelectionMgr
-        private const int SlotSelMgrGetSelectedElements = 10;       // -> VARIANT(SAFEARRAY)（仅 ZArray 不可用时回退）
-        private const int SlotSelMgrGetSelectedElementsZArray = 19; // -> IZArray*（主路径）
+        private const int SlotSelMgrGetSelectedElementsZArray = 19; // -> IZArray*
         private const int SlotArrayCount = 7;            // IZArray::Count(int*)
         private const int SlotArrayGet = 9;              // IZArray::Get(int index, out IZElement*)
         private const int SlotElemGetType = 7;           // IZElement
@@ -90,28 +88,12 @@ namespace caxa3dAttributeManageraddin
         private const int SlotCpmSetValueByName = 10;    // IZCustomPropMgr
         private const int SlotCpmRemoveByName = 13;      // IZCustomPropMgr
 
-        // ZIronCADApp 属性在默认接口上的 DISPID
-        private const int DispidZIronCADApp = 0x2A;
-
-        private const int HR_NOINTERFACE = unchecked((int)0x80004002);
-
         private const short VT_BSTR = 8;
 
         /// <summary>需要在界面上展示的四个目标字段（自定义属性精确名）。</summary>
         public static readonly string[] TargetFields = { "SC图号", "SC名称", "SC规格", "SC材料" };
 
         #region 原始 COM 互操作
-
-        [ComImport, Guid("00020400-0000-0000-C000-000000000046"),
-         InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        private interface IRawDispatch
-        {
-            [PreserveSig] int GetTypeInfoCount(out int pcTInfo);
-            [PreserveSig] int GetTypeInfo(int iTInfo, int lcid, out IntPtr ppTInfo);
-            [PreserveSig] int GetIDsOfNames(ref Guid riid, IntPtr rgszNames, int cNames, int lcid, IntPtr rgDispId);
-            [PreserveSig] int Invoke(int dispIdMember, ref Guid riid, int lcid, ushort wFlags,
-                IntPtr pDispParams, IntPtr pVarResult, IntPtr pExcepInfo, IntPtr puArgErr);
-        }
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate int FnGetObj(IntPtr self, out IntPtr ppv);
@@ -135,9 +117,6 @@ namespace caxa3dAttributeManageraddin
         private delegate int FnArrayGet(IntPtr self, int index, out IntPtr ppElem);
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-        private delegate int FnGetVariantResult(IntPtr self, IntPtr pvarResult);
-
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate int FnBstrArg(IntPtr self,
             [MarshalAs(UnmanagedType.BStr)] string bstrName);
 
@@ -152,9 +131,6 @@ namespace caxa3dAttributeManageraddin
             [MarshalAs(UnmanagedType.BStr)] string bstrName, IntPtr pvarValue);
 
         [DllImport("oleaut32.dll")] private static extern int VariantClear(IntPtr pvarg);
-        [DllImport("oleaut32.dll")] private static extern int SafeArrayGetLBound(IntPtr psa, int nDim, out int pLbound);
-        [DllImport("oleaut32.dll")] private static extern int SafeArrayGetUBound(IntPtr psa, int nDim, out int pUbound);
-        [DllImport("oleaut32.dll")] private static extern int SafeArrayGetElement(IntPtr psa, ref int rgIndices, out IntPtr pvData);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MEMORY_BASIC_INFORMATION
@@ -206,43 +182,6 @@ namespace caxa3dAttributeManageraddin
             return fn(pIface, out ppv);
         }
 
-        /// <summary>
-        /// 通过旧自动化接口的默认 IDispatch 读取 ZIronCADApp 属性（memid 0x2A）。
-        /// 进程内兜底路径：_site.Application 的 QI 意外失败时使用。
-        /// </summary>
-        private static object GetZAppObject(object app)
-        {
-            IRawDispatch d = (IRawDispatch)app;
-            Guid empty = Guid.Empty;
-            IntPtr pDp = Marshal.AllocCoTaskMem(32);
-            for (int i = 0; i < 4; i++) Marshal.WriteInt64(pDp, i * 8, 0);
-            IntPtr pResult = Marshal.AllocCoTaskMem(24);
-            for (int i = 0; i < 24; i++) Marshal.WriteByte(pResult, i, 0);
-            IntPtr pExcep = Marshal.AllocCoTaskMem(80);
-            for (int i = 0; i < 80; i++) Marshal.WriteByte(pExcep, i, 0);
-            IntPtr pArgErr = Marshal.AllocCoTaskMem(4);
-            try
-            {
-                const ushort INVOKE_PROPERTYGET = 2;
-                int hr = d.Invoke(DispidZIronCADApp, ref empty, 0, INVOKE_PROPERTYGET, pDp, pResult, pExcep, pArgErr);
-                if (hr != 0)
-                    throw new InvalidOperationException(
-                        string.Format("读取 ZIronCADApp 属性失败 hr=0x{0:X}", hr));
-                IntPtr po = Marshal.ReadIntPtr(pResult, 8);
-                if (po == IntPtr.Zero) return null;
-                object o = Marshal.GetObjectForIUnknown(po);
-                Marshal.Release(po);
-                return o;
-            }
-            finally
-            {
-                Marshal.FreeCoTaskMem(pDp);
-                Marshal.FreeCoTaskMem(pResult);
-                Marshal.FreeCoTaskMem(pExcep);
-                Marshal.FreeCoTaskMem(pArgErr);
-            }
-        }
-
         #endregion
 
         #region 会话
@@ -264,19 +203,6 @@ namespace caxa3dAttributeManageraddin
             IntPtr pUnk = Marshal.GetIUnknownForObject(appObj);
             int hr = TryQI(pUnk, IID_IZBaseApp, out pBase);
             Marshal.Release(pUnk);
-
-            if (hr == HR_NOINTERFACE)
-            {
-                // 兜底：经 IDispatch 读 ZIronCADApp 再 QI
-                Diagnostics.Log("QI(IZBaseApp) E_NOINTERFACE, fallback to IDispatch ZIronCADApp");
-                object zObj = GetZAppObject(appObj);
-                if (zObj != null)
-                {
-                    pUnk = Marshal.GetIUnknownForObject(zObj);
-                    hr = TryQI(pUnk, IID_IZBaseApp, out pBase);
-                    Marshal.Release(pUnk);
-                }
-            }
 
             if (hr != 0 || pBase == IntPtr.Zero)
             {
@@ -475,30 +401,23 @@ namespace caxa3dAttributeManageraddin
         /// <summary>
         /// 获取元素上的“共享”CustomPropMgr。
         /// 优先走 GetCustomPropManager(selector)+IsSharedMgr 校验；
-        /// 都拿不到共享管理器时回退 get_CustomPropMgr(vbShared=TRUE)。
+        /// 都拿不到共享管理器时回退 get_CustomPropMgr(vbShared=TRUE)；
+        /// 仍未取到返回 Zero，调用方判定失败——不拿未确认共享的管理器凑数。
         /// </summary>
         private static IntPtr GetSharedCustomPropMgr(IntPtr pElem, string tag)
         {
-            IntPtr firstFallback = IntPtr.Zero;
             foreach (int selector in new int[] { 0, 1 })
             {
                 IntPtr pMgr = TryGetCustomPropManager(pElem, selector, tag);
                 if (pMgr == IntPtr.Zero) continue;
                 if (TryIsSharedMgr(pMgr, tag + ",selector=" + selector)) return pMgr;
-                if (firstFallback == IntPtr.Zero) firstFallback = pMgr;
-                else Marshal.Release(pMgr);
+                Marshal.Release(pMgr);
             }
-            // 回退路径：旧属性 getter（多数机器可用）
+            // 回退路径：旧属性 getter（-1 = VARIANT_BOOL TRUE）
             IntPtr pProp = GetCustomPropMgr(pElem, -1, tag);
-            if (pProp != IntPtr.Zero)
-            {
-                if (firstFallback != IntPtr.Zero) Marshal.Release(firstFallback);
-                return pProp;
-            }
-            if (firstFallback != IntPtr.Zero)
-                Diagnostics.Log("GetSharedCustomPropMgr(" + tag + "): 两个主路径均未确认共享，" +
-                    "使用 GetCustomPropManager 返回的第一个管理器");
-            return firstFallback;
+            if (pProp != IntPtr.Zero) return pProp;
+            Diagnostics.Log("GetSharedCustomPropMgr(" + tag + "): 未取到共享 CustomPropMgr");
+            return IntPtr.Zero;
         }
 
         /// <summary>
@@ -613,8 +532,7 @@ namespace caxa3dAttributeManageraddin
         /// <summary>
         /// 获取用户当前选中的第一个“零部件类”元素（IZElement 指针，调用方负责 Release）。
         /// 路径（全部 vtable 直调）：IZSceneDoc::get_SelectionMgr(27)
-        ///   A) SelectionsAvailable(17) → GetSelectedElementsZArray(19) → IZArray::Count(7)/Get(9)
-        ///   B) 回退：GetSelectedElements(10) → VARIANT(SAFEARRAY of VT_DISPATCH/VT_UNKNOWN)
+        ///   → GetSelectedElementsZArray(19) → IZArray::Count(7)/Get(9)
         /// 逐个按类型过滤，面/边/特征等非零部件选择被忽略。无有效选中或接口不可用时返回 Zero。
         /// </summary>
         private static IntPtr GetSelectedElement(IntPtr pScene, string tag)
@@ -633,31 +551,26 @@ namespace caxa3dAttributeManageraddin
 
             try
             {
-                // 主路径：ZArray（元素以类型化指针返回，代理完整）
                 fn = Slot(pSelMgr, SlotSelMgrGetSelectedElementsZArray);
-                if (LooksCallable(fn))
+                if (!LooksCallable(fn))
                 {
-                    FnGetObj za = (FnGetObj)Marshal.GetDelegateForFunctionPointer(fn, typeof(FnGetObj));
-                    IntPtr pArr;
-                    hr = za(pSelMgr, out pArr);
-                    Diagnostics.Trace(string.Format("GetSelectedElementsZArray({0}) hr=0x{1:X} ptr=0x{2:X}",
-                        tag, hr, pArr.ToInt64()));
-                    if (hr == 0 && pArr != IntPtr.Zero)
-                    {
-                        try
-                        {
-                            // ZArray 可用时以它为准（即使没选中零部件也不再重复抓取）
-                            return PickPartFromZArray(pArr, tag);
-                        }
-                        finally
-                        {
-                            Marshal.Release(pArr);
-                        }
-                    }
+                    Diagnostics.Log("GetSelectedElementsZArray(" + tag + ") 跳过：函数指针无效");
+                    return IntPtr.Zero;
                 }
-
-                // 回退路径：仅当 ZArray 接口不可用/调用失败时才尝试 SAFEARRAY
-                return GetSelectedElementViaSafeArray(pSelMgr, tag);
+                FnGetObj za = (FnGetObj)Marshal.GetDelegateForFunctionPointer(fn, typeof(FnGetObj));
+                IntPtr pArr;
+                hr = za(pSelMgr, out pArr);
+                Diagnostics.Trace(string.Format("GetSelectedElementsZArray({0}) hr=0x{1:X} ptr=0x{2:X}",
+                    tag, hr, pArr.ToInt64()));
+                if (hr != 0 || pArr == IntPtr.Zero) return IntPtr.Zero;
+                try
+                {
+                    return PickPartFromZArray(pArr, tag);
+                }
+                finally
+                {
+                    Marshal.Release(pArr);
+                }
             }
             finally
             {
@@ -723,50 +636,6 @@ namespace caxa3dAttributeManageraddin
             finally
             {
                 Marshal.Release(pRaw);
-            }
-        }
-
-        /// <summary>路径 B：GetSelectedElements → VARIANT(SAFEARRAY of VT_DISPATCH/VT_UNKNOWN)。</summary>
-        private static IntPtr GetSelectedElementViaSafeArray(IntPtr pSelMgr, string tag)
-        {
-            IntPtr fn = Slot(pSelMgr, SlotSelMgrGetSelectedElements);
-            if (!LooksCallable(fn))
-            {
-                Diagnostics.Trace("GetSelectedElements(" + tag + ") 跳过：函数指针无效");
-                return IntPtr.Zero;
-            }
-            FnGetVariantResult f = (FnGetVariantResult)Marshal.GetDelegateForFunctionPointer(
-                fn, typeof(FnGetVariantResult));
-            IntPtr pVar = Marshal.AllocCoTaskMem(24);
-            for (int k = 0; k < 24; k++) Marshal.WriteByte(pVar, k, 0);
-            try
-            {
-                int hr = f(pSelMgr, pVar);
-                short vt = Marshal.ReadInt16(pVar, 0);
-                Diagnostics.Trace(string.Format("GetSelectedElements({0}) hr=0x{1:X} vt=0x{2:X}", tag, hr, vt));
-                if (hr != 0) return IntPtr.Zero;
-                // VT_ARRAY|VT_DISPATCH(0x2009) 或 VT_ARRAY|VT_UNKNOWN(0x200D)
-                if ((vt & 0x2000) == 0 || (vt & 0xFFF) != 9 && (vt & 0xFFF) != 13) return IntPtr.Zero;
-                IntPtr psa = Marshal.ReadIntPtr(pVar, 8);
-                if (psa == IntPtr.Zero) return IntPtr.Zero;
-
-                int lbound, ubound;
-                if (SafeArrayGetLBound(psa, 1, out lbound) != 0 ||
-                    SafeArrayGetUBound(psa, 1, out ubound) != 0) return IntPtr.Zero;
-                Diagnostics.Trace(string.Format("selection safearray({0}) bounds {1}..{2}", tag, lbound, ubound));
-                for (int i = lbound; i <= ubound; i++)
-                {
-                    IntPtr pRaw;
-                    if (SafeArrayGetElement(psa, ref i, out pRaw) != 0 || pRaw == IntPtr.Zero) continue;
-                    IntPtr pElem = FilterPartElement(pRaw, i, tag);
-                    if (pElem != IntPtr.Zero) return pElem;
-                }
-                return IntPtr.Zero;
-            }
-            finally
-            {
-                VariantClear(pVar);
-                Marshal.FreeCoTaskMem(pVar);
             }
         }
 

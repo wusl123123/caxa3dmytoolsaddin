@@ -27,9 +27,17 @@ caxa3dmytoolsaddin/
     ├── Caxa3dcudeaddin/                  立方体工具
     ├── caxa3dAttributeManageraddin/      自定义属性管理器
     ├── caxa3dcodenameextraction/         带图改名（含 CRX 桥子工程）
-    ├── caxa3didcskill/                   后台进程清理
     ├── caxa3dsetMaterial/                材料工具
-    └── caxa3dTreeBom/                    树形BOM
+    ├── caxa3dTreeBom/                    树形BOM
+    ├── caxa3dminitool/                   小工具合集
+    ├── caxa3dsheetmaster/                折弯管理大师（含 CRX 桥子工程）
+    ├── caxa3dexbtest/                    图纸环境矩形测试（含 CRX 桥子工程）
+    ├── caxa3dapigetaddin/                操作 API 抓取器（含 CRX 桥子工程）
+    ├── caxa3dCXDFTViewUpdate/            刷新图纸视图（含 CRX 桥子工程）
+    └── caxa3didcskill/                  后台进程清理（DLL 只是启动器，真正干活的是进程外 EXE）
+
+tools/
+└── caxa3didcskill/                     独立工具源码：编译出 caxa3didcskill.exe，随包部署
 ```
 
 运行期布局：
@@ -39,6 +47,7 @@ C:\Program Files\CAXA\CAXA 3D\2027\bin\
 ├── caxa3dmytoolsaddin.dll (+ .pdb)
 ├── Caxa3dMyTools.Contracts.dll
 └── caxa3dmytoolsaddin\plugins\<插件名>\<插件名>.dll
+    └── caxa3didcskill\   caxa3didcskill.dll（启动器）+ caxa3didcskill.exe（进程外工具）
 ```
 
 ## 三、关键实现
@@ -70,8 +79,11 @@ C:\Program Files\CAXA\CAXA 3D\2027\bin\
 ### 3.4 统一工具箱
 
 - Host 注册唯一 Ribbon 按钮「我的工具箱」→ `MainToolboxForm`。
-- 主窗口顶部只有「窗口前置」开关（默认开启）；中间 `FlowLayoutPanel` 从 `PluginManager.Plugins` 动态生成子插件按钮；不显示连接状态。
-- 子插件实现 `Activate()`，由主窗口按钮调用 `Show()+Activate()`。
+- 主窗口顶部只有「窗口前置」开关（默认开启）；主体是 `DataGridView` 三列表格（`1. 常用插件` / `2. 独立插件` / `3. 测试插件`），按 `IPlugin.Category` 分列，不显示连接状态。
+- 表格硬约束：`WrapMode=False`、10F 固定字体、行高 36/表头 38、`AutoSizeColumnsMode=Fill` + 逐列实测 `MinimumWidth`，窗口 `MinimumSize` 由三列最小宽之和推导 → 长名称不折行、不缩字号、不被遮挡。
+- 空分类显示「（暂无插件）」占位；未知 `Category` 归入常用列，避免插件从界面消失。
+- 子插件实现 `Activate()`，由主窗口单元格单击（或 Enter/Space）调用 `Show()+Activate()`。
+- `2. 独立插件` 列现有唯一入口 `caxa3didcskill`（显示名「后台进程清理」）：该插件 DLL 只是**启动器**，不实现清理逻辑、不引用 ICAPI、不建窗口；`Activate()` 找到同目录的 `caxa3didcskill.exe`，已有实例则 `ShowWindow+SetForegroundWindow` 前台化（工具带定时清理，多开会并发清理同一批进程），否则 `Process.Start` 拉起。进程外执行是规则 16.6 的硬要求。
 
 ### 3.5 子插件迁入模式（统一清单）
 
@@ -121,12 +133,15 @@ C:\Program Files\CAXA\CAXA 3D\2027\bin\
 
 ### 5.2 deploy / restore
 
-- 自动发现所有 CAXA 版本目录（`Get-ChildItem ...\CAXA 3D -Directory` 且存在 `bin`）。
+- 自动发现所有 CAXA 版本目录（多来源探测，见下两条）。
 - 提权前先把脚本复制到 `C:\ProgramData\caxa3dmytoolsaddin\`（真实文件系统），用 `-WorkRoot` 传原业务目录。
 - 只对“干净状态”做一次覆盖式 `*.bak` 备份；当前文件已含本程序登记时跳过。
 - **restore 永不整份回滚 `.bak`**：config/manifest 是所有插件共享文件，回滚会抹掉其他插件登记。改为手术式移除（`local-name()` XML 精确删除 + 无条件正则兜底），可重复执行。
 - 删除操作全部 try/catch；CAXA 锁 DLL 时提示退出后重试，最后统一做残留校验。
 - 旧独立插件自动撤销：config 条目、manifest 依赖、同名 DLL、按旧 CLSID 匹配的 Applications 键（含中文显示名键）。
+- 独立插件（`caxa3didcskill`）专项：deploy 在 `[3c/5]` 校验 `plugins\caxa3didcskill\` 内启动器 DLL 与 `caxa3didcskill.exe` 都在（缺一即 `$hadError`），并删除 bin 根目录的散放旧 EXE；部署校验行追加 `独立插件=…/…`、`无散放EXE=…`。restore 先 `Stop-Process caxa3didcskill`（EXE 在跑就删不掉，结束它不影响 CAXA），再删插件目录与 bin 根散放 EXE，残留校验追加目录/EXE/进程三项。
+- **安装位置以实际探测为准，不假设在 C 盘**（2026-10-31）：`Get-CaxaVersionDirs` 按序探测 ①环境变量 `CAXA3D_ROOT`（手工指定，最高优先级）→ ②注册表 `HKLM/HKCU\SOFTWARE[+WOW6432Node]\CAXA\CAXA 3D\<ver>\InstallDir`（实测值是**版本目录本身**，形如 `<根>\<年份>\`）→ ③卸载表 `Uninstall\*` 中 CAXA 条目的 `InstallLocation` → ④各固定盘 `<盘>:\Program Files\CAXA\CAXA 3D` → ⑤兜底 C 盘；每个候选要么本身是版本目录（名字纯数字且含 `bin`），要么是安装根（含 `<年份>\bin`），否则丢弃。本机取证：`HKLM\SOFTWARE\CAXA\CAXA 3D\26.0\InstallDir = ...\CAXA 3D\2024\`、`29.0 = ...\2027\`，2024 与 2027 **都是真实安装**（各自 `bin\IronCad.exe`、`Config\IronCad.Addin.config`、`bin\IronCad.exe.manifest` 齐全）。
+- **陷阱：根去重与版本去重必须是两张表**（2026-10-31 踩过）：`InstallDir` 指向版本目录本身，若把它和"安装根"塞进同一个 `$seen`，该版本目录会先被登记成"已处理的根"，随后扫描真根时判定"已处理"而**整版漏装**——本机现象正是 2024 被丢只留 2027，而当次自检还把它误读成"已卸载残留"，结论是错的。修法：`$seenRoot` / `$seenVer` 分离；候选本身是 `…\<年份>` 且含 `bin` 时直接入列并 `continue`，不当根往下扫；版本列表按目录名排序，输出稳定。
 - BOM 数量自检（必须为 1）：`$b=[IO.File]::ReadAllBytes($p); $n=0; while(($n+2) -lt $b.Length -and $b[$n] -eq 0xEF){$n+=3}; $n/3`。
 - 实测（2026-10-22）：部署后 config 20 条（19 原生 + 1 本程序）/ manifest 依赖 24 条；卸载后回到 19/23，注册表、bin、插件目录零残留。
 
@@ -145,12 +160,14 @@ caxa3dmytoolsaddin-<版本>/
 ├── caxa3dmytoolsaddin.dll
 ├── Caxa3dMyTools.Contracts.dll
 ├── plugins/<插件名>/<插件名>.dll（含 xlsx/xml/txt 等运行期资源，不含 pdb）
+├── plugins/caxa3didcskill/caxa3didcskill.exe（独立插件列的进程外工具）
 ├── deploy.ps1 / restore.ps1
 ├── 安装.bat / 卸载.bat
 └── README.txt
 ```
 
 - 扩展名白名单需随插件新增资源同步扩充（如 `.xml`）；发现 `.cs/.csproj/.sln/.snk/.resx/.props/.targets` 立即中止。
+- 缺件校验两道：①`plugins\` 下每个工程目录必须已在 `src\plugins` 有同名 DLL；②`src\plugins\caxa3didcskill` 必须同时有启动器 DLL 与 `caxa3didcskill.exe`（少了 EXE，界面照样有按钮、点击必报错，所以打包阶段直接中止）。
 - 新增插件只需编译后放入 `src\plugins\<插件名>\` 再重新打包，无需改主程序。
 
 ## 六、里程碑（集合体级）
@@ -165,11 +182,21 @@ caxa3dmytoolsaddin-<版本>/
 | 2026-10-29 | 并入材料工具、树形BOM（6 子插件），补 legacy 撤销与 `.xml` 白名单 |
 | 2026-10-29 | 跨插件约定：自定义属性统一写共享表；CAXA COM 必须 STA UI 线程 |
 | 2026-10-29 | ICM Utils.icc 调查：结论“不可用”；icc 解析工具固化到 `_probe-tools` |
+| 2026-10-31 | 主工具箱改三列表格（常用/独立/测试，`IPlugin.Category` 归类）；`caxa3didcskill` 迁出为独立 EXE；并入操作 API 抓取器（第 9 个子插件，含 CRX 桥） |
+| 2026-10-31 | 「2. 独立插件」列真正有内容：新增启动器插件 `plugins\caxa3didcskill`（`Category=Independent`，只负责拉起进程外 EXE）；`build/deploy/restore/package` 四个脚本同步管理该独立工具（暂存、落位校验、卸载清理、打包缺件校验） |
+| 2026-10-31 | `caxa3dminitool` 界面改为与主工具箱同款四列表格（列=分类、单元格=工具、单击执行、悬停说明）；deploy/restore 安装位置改为多来源实际探测（`CAXA3D_ROOT` / 注册表 InstallDir / 卸载表 / 各固定盘），不再假设 C 盘 |
+| 2026-10-31 | 修复探测回归：根去重与版本去重共用 `$seen` 导致本机 2024 被漏装（只剩 2027）。改为 `$seenRoot`/`$seenVer` 两张表 + 版本目录直入列，restore 同步补「发现版本目录」输出；真机实测 2024(26.0)/2027(29.0) 双版本安装与卸载全部通过 |
+| 2026-11-01 | 并入「刷新图纸视图」（第 11 个子插件，`Category=BuiltIn`，落「1. 常用插件」列）；`deploy.ps1` 的 CRX 落位步骤由「只认 caxa3dcodenameextraction.crx」改为 `$crxItems` 列表逐个处理，`build.ps1`/`restore.ps1`/`package.ps1` 同步登记第二个 CRX 插件 |
 
 ### 验证结果
 
 - 2026-10-22：Host 强名称有效，内嵌清单含且仅含 `clrClass caxa3dmytoolsaddin.Addin`；两个插件 DLL 无内嵌清单；反射确认均为 `IPlugin` 实现，`ZAddinSite` 类型等价为 true。
 - 2026-10-29：6 个插件工程 + Host 全部编译通过（0 错误）；两个新插件 DLL 各恰好暴露 1 个 `IPlugin`；`MainForm(null)` 冒烟构造成功，种子资源播种正常。
+- 2026-10-31：`build.ps1` 全量 10 个子插件编译通过（0 错误）；`caxa3dapigetaddin` 暂存目录含 DLL + `caxa3dapicapture.crx`；Host 清单仍恰好 1 条 `clrClass caxa3dmytoolsaddin.Addin`、0 条 `clrSurrogate`，token `56647e1eee90f6d4`；插件 DLL 无内嵌清单；槽位检查 174 / OK 124 / MISMATCH 3 / NOTFOUND 0 / UNMAPPED 47（基线未变）；三列表格离线截图实测无折行、无遮挡。
+- 2026-10-31（独立插件列）：启动器 DLL token = `56647e1eee90f6d4`；离线假宿主冒烟：`Id=caxa3didcskill`、`DisplayName=后台进程清理`、`Category=Independent`（落在「2. 独立插件」列），已有实例时 `Activate()` 不重复启动、无实例时能拉起 EXE，退出码 0；打包 zip 内含 `plugins\caxa3didcskill\caxa3didcskill.dll` + `caxa3didcskill.exe`；deploy/restore 在模拟 CAXA 根（`CAXA3D_ROOT` 指向临时目录，verTag 1101.0 隔离）实跑：安装后独立插件目录 DLL+EXE 就位、bin 根无散放 EXE、注册表登记成功，卸载后目录/EXE/注册表/进程零残留，校验通过。四个脚本单 BOM、`Parser::ParseFile` 0 错误。
+- 2026-10-31（minitool 表格 + 安装位置探测）：`caxa3dminitool` 0 warning 0 error；离屏截图实测四列表格列头/单元格无折行无遮挡、空单元格浅灰留白、4 列 3 行 10 个工具分布 3+3+2+2。~~安装位置探测在本机只读实跑：正确发现 2027 并过滤已卸载 2024 的残留条目~~ ← **此结论有误，2024 是本机真实安装，被探测逻辑漏掉**，见下条修正。
+- 2026-11-01（刷新图纸视图迁入）：`build.ps1` 全量 0 错误，本插件单独编译 0 warning 0 error；插件 DLL `mt.exe` 抽 #2 资源=「找不到指定的资源类型」（无内嵌清单，与既有子插件一致），`sn -vf` 有效、token `56647e1eee90f6d4`；反射冒烟 = 恰好 1 个 `IPlugin`、`Id=caxa3dCXDFTViewUpdate`、`Category=BuiltIn`、文件名==Id；槽位检查 174/OK 124/MISMATCH 3/NOTFOUND 0/UNMAPPED 47（与 10-31 基线逐位一致，本插件全走 RCW 未新增槽位）；假根模拟（3098/3099 → verTag 1100.0/1101.0，预置外来 AddIn/dependency/CxAutorun 条目）安装两次幂等、卸载零残留且外来条目原样保留；证据 `C:\code\ICAPI\_probe-tools\out\caxa3dCXDFTViewUpdate\`。
+- 2026-10-31（双版本修正）：取证 `HKLM\SOFTWARE\CAXA\CAXA 3D\26.0\InstallDir = ...\CAXA 3D\2024\`、`29.0 = ...\2027\`，两目录 `bin\IronCad.exe`、`Config\IronCad.Addin.config`、`bin\IronCad.exe.manifest` 均齐全，且 2024 的 `Applications\caxa3dmytoolsaddin` 早在旧版脚本中就存在。修复后探测输出 `发现版本目录：2024, 2027`；双版本模拟根（3098/3099→verTag 1100.0/1101.0，隔离真实 26.0/29.0）安装+卸载全部通过、零残留、真实键未被触碰；**真机实跑**：`发现版本目录：2024, 2027`，两版本各自 `DLL/config/manifest/registry/CRX/CxAutorun/独立插件/无散放EXE` 全 True，落位 `caxa3dmytoolsaddin.dll` 25600B + 10 个插件 + `caxa3didcskill.exe`，注册表 `26.0`/`29.0` 双登记；四脚本 `Parser::ParseFile` 0 错误、单 BOM。
 
 ## 七、子项目索引
 
@@ -178,9 +205,12 @@ caxa3dmytoolsaddin-<版本>/
 | Caxa3dcudeaddin | [Caxa3dcudeaddin-项目总结](plugins/Caxa3dcudeaddin/Caxa3dcudeaddin-项目总结.md) | 原点建块、vtable 槽位、子进程兜底 |
 | caxa3dAttributeManageraddin | [caxa3dAttributeManageraddin-项目总结](plugins/caxa3dAttributeManageraddin/caxa3dAttributeManageraddin-项目总结.md) | xlsx 属性表、共享表精确匹配 |
 | caxa3dcodenameextraction | [caxa3dcodenameextraction-项目总结](plugins/caxa3dcodenameextraction/caxa3dcodenameextraction-项目总结.md) | 带图改名、CRX 桥、17s 卡顿归因 |
-| caxa3didcskill | [caxa3didcskill-项目总结](plugins/caxa3didcskill/caxa3didcskill-项目总结.md) | 后台进程识别与保护 |
+| caxa3didcskill | [caxa3didcskill-项目总结](plugins/caxa3didcskill/caxa3didcskill-项目总结.md) | 独立插件列启动器：进程外 EXE 的发现、单实例前台化、随包部署 |
+| caxa3didcskill（工具本体） | [caxa3didcskill-项目总结](tools/caxa3didcskill/caxa3didcskill-项目总结.md) | 独立 EXE：后台进程识别与保护 |
 | caxa3dsetMaterial | [caxa3dsetMaterial-项目总结](plugins/caxa3dsetMaterial/caxa3dsetMaterial-项目总结.md) | 材料/密度/颜色、共享表、色卡 |
 | caxa3dTreeBom | [caxa3dTreeBom-项目总结](plugins/caxa3dTreeBom/caxa3dTreeBom-项目总结.md) | 树形BOM、STA 线程模型、界面布局 |
+| caxa3dapigetaddin | [caxa3dapigetaddin-项目总结](plugins/caxa3dapigetaddin/caxa3dapigetaddin-项目总结.md) | 操作 API 实时抓取、事件 sink、CRX 图纸事件桥 |
+| caxa3dCXDFTViewUpdate | [caxa3dCXDFTViewUpdate-项目总结](plugins/caxa3dCXDFTViewUpdate/caxa3dCXDFTViewUpdate-项目总结.md) | OpenFile2 + CRX CLOSEDOC 批处理、弹窗代点、后台化 |
 
 ## 八、专题：ICM Utils.icc 在 2027 不可用（结论摘要）
 
@@ -211,7 +241,9 @@ caxa3dmytoolsaddin-<版本>/
 
 ## 九、待验证 / 待办（集合体级）
 
-1. 启动 CAXA 3D 2027，确认功能区只有一个「我的工具箱」按钮，主窗口列出 6 个子插件按钮且均可打开。
-2. 装机验证：安装 → 6 个插件 DLL 均被加载（各自 trace 有 `InitSelf/Initialize`）→ 卸载后 config/manifest/注册表/插件目录零残留。
-3. 新增子插件时只改 `build.ps1` 清单、`package.ps1` 白名单、`deploy.ps1` legacy 清单三处，主程序无需改动。
-4. 各子插件自身的待实测项见对应子项目总结。
+1. 启动 CAXA 3D 2027，确认功能区只有一个「我的工具箱」按钮，主窗口三列表格列出 11 个插件且均可打开（常用 6 / 独立 1（后台进程清理）/ 测试 4）。其中独立列的入口只在真机上验证过「启动器能拉起 EXE + 不重复启动」，完整链路（CAXA 内点击 → 独立进程弹窗）待在装机器上确认。
+2. 装机验证：安装 → 11 个插件 DLL 均被加载（各自 trace 有 `Initialize`）→ 卸载后 config/manifest/注册表/插件目录/CAXADraft\bin 两个 .crx 零残留。
+3. `caxa3dCXDFTViewUpdate.crx` 需真机确认：随包落进 `CAXADraft\Bin` 并被 `CxAutorun.cx` 拉起，`CMD:PING` 有 `REQ.ack`，CLOSEDOC 链路能改 .exb mtime（原独立项目自述该链路稳定性待复验）。
+4. 操作 API 抓取器需真机确认：`caxa3dapicapture.crx` 能进 `CAXADraft\Bin` 并被 `CxAutorun.cx` 加载，图纸环境事件能写入 `%TEMP%\caxa3d_crx_events.log`。
+5. 新增子插件时只改 `build.ps1` 清单、`package.ps1` 白名单、`deploy.ps1` legacy 清单三处，主程序无需改动；插件分类只需实现 `IPlugin.Category`。
+6. 各子插件自身的待实测项见对应子项目总结。

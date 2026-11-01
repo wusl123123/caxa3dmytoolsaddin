@@ -47,7 +47,9 @@ namespace caxa3dcodenameextraction
         private Button _btnRename;
         private Button _btnSheetMetal;
         private Button _btnTitleBlock;
+        private Button _btnSheetSize;
         private Button _btnStop;
+        private readonly SheetSizeRule _sheetSizeRule = SheetSizeRule.Load();
         private Button _btnTopMost;
         private Button _btnRules;
         private Button _btnHelp;
@@ -95,9 +97,9 @@ namespace caxa3dcodenameextraction
             Text = AppTitleBase + "-" + BuildVersion();
             Font = new Font("Microsoft YaHei UI", 9F);
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(820, 586);
+            ClientSize = new Size(820, 620);
             // 最小宽度按“新零件名输入框 560 + 右侧标记 140”定，避免缩小时右标记被裁掉
-            MinimumSize = new Size(836, 546);
+            MinimumSize = new Size(836, 580);
             MaximizeBox = true;
 
             var panelTop = new Panel { Dock = DockStyle.Top, Height = 44 };
@@ -120,7 +122,7 @@ namespace caxa3dcodenameextraction
                 _btnTopMost, _btnRules, _btnHelp, _btnRefresh,
                 _btnRegCrx, _btnUnregCrx, _btnSaveLog, _btnClearLog });
 
-            var panelBody = new Panel { Dock = DockStyle.Top, Height = 276, Padding = new Padding(10) };
+            var panelBody = new Panel { Dock = DockStyle.Top, Height = 314, Padding = new Padding(10) };
 
             _lblConnection = new Label
             {
@@ -198,6 +200,8 @@ namespace caxa3dcodenameextraction
             _btnSheetMetal = MakeButton("钣金件设计环境设默认", 214, 218, 200);
             _btnTitleBlock = MakeButton("工程图标题栏设默认", 422, 218, 200);
             _btnStop = MakeButton("停止", 630, 218, 70);
+            // 迁自 caxa3dsheetsizewrite：紧跟「钣金件设计环境设默认」下方
+            _btnSheetSize = MakeButton("钣金件尺寸填写", 214, 252, 200);
             _btnStop.Enabled = false;
 
             _lblStatus = new Label
@@ -211,7 +215,8 @@ namespace caxa3dcodenameextraction
             panelBody.Controls.AddRange(new Control[] {
                 _lblConnection, _lblOldName, _txtOldName, _lblOldFlag,
                 _lblNewName, _txtNewName, _lblNewFlag, lblRule, _cboRule,
-                _btnSep, _btnRename, _btnManualSep, _btnSheetMetal, _btnTitleBlock, _btnStop, _lblStatus });
+                _btnSep, _btnRename, _btnManualSep, _btnSheetMetal, _btnTitleBlock, _btnSheetSize,
+                _btnStop, _lblStatus });
 
             _txtLog = new TextBox
             {
@@ -246,6 +251,7 @@ namespace caxa3dcodenameextraction
             _btnManualSep.Click += BtnManualSep_Click;
             _btnSheetMetal.Click += BtnSheetMetal_Click;
             _btnTitleBlock.Click += BtnTitleBlock_Click;
+            _btnSheetSize.Click += BtnSheetSize_Click;
             _btnStop.Click += (s, e) => StopFlow();
 
             _timer = new System.Windows.Forms.Timer { Interval = 800 };
@@ -848,6 +854,7 @@ namespace caxa3dcodenameextraction
             _btnManualSep.Enabled = false;
             _btnSheetMetal.Enabled = false;
             _btnTitleBlock.Enabled = false;
+            _btnSheetSize.Enabled = false;
             _btnStop.Enabled = true;
             PopupAutoYes.Enabled = true;
             Cursor = Cursors.WaitCursor;
@@ -869,6 +876,7 @@ namespace caxa3dcodenameextraction
                 PopupAutoYes.FileDialogTarget = null;
                 PopupAutoYes.Suspend = false;
                 _btnStop.Enabled = false;
+                _btnSheetSize.Enabled = true;
                 _running = false;
                 Cursor = Cursors.Default;
                 RefreshInfo(false);
@@ -1068,6 +1076,56 @@ namespace caxa3dcodenameextraction
             }
 
             RunLongFlow("工程图标题栏设默认", delegate { UpdateTitleBlock(exb); });
+        }
+
+        /// <summary>
+        /// 钣金件尺寸填写（迁自 caxa3dsheetsizewrite）：
+        /// 虚拟钣金件 → 展开件最小包围盒取长宽 → 组合板厚/材料 → 回填 SC规格/SC材料 → 恢复默认设计环境 → 保存。
+        /// </summary>
+        private void BtnSheetSize_Click(object sender, EventArgs e)
+        {
+            if (_running) return;
+            if (_siteApp == null)
+            {
+                MessageBox.Show("尚未连接 CAXA 3D。", AppTitleBase);
+                return;
+            }
+
+            SheetSizeValidateResult v;
+            try
+            {
+                v = SheetSizeTool.Validate(_siteApp);
+            }
+            catch (Exception ex)
+            {
+                AddLog("钣金件尺寸填写校验异常：" + ex.Message);
+                Diagnostics.Log("sheet size validate failed: " + ex);
+                MessageBox.Show(ex.Message, AppTitleBase, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (!v.Ok)
+            {
+                AddLog("钣金件尺寸填写未通过校验：" + v.Message);
+                MessageBox.Show(v.Message, AppTitleBase, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            RunLongFlow("钣金件尺寸填写", delegate
+            {
+                SheetSizeExecuteResult r = SheetSizeTool.Execute(_siteApp, _sheetSizeRule, AddLog,
+                    delegate { return _stopRequested; });
+
+                AddLog("");
+                AddLog("---------- 执行结果 ----------");
+                AddLog("规格            : " + r.Spec);
+                AddLog("材料            : " + r.MaterialSpec);
+                AddLog("默认配置恢复    : " + (r.ConfigRestored ? "是（" + r.DefaultConfigName + "）" : "否"));
+                AddLog("保存            : " + (r.Saved ? "是" : "否"));
+                if (r.MaterialFallback) AddLog("注意：未读取到材料字段，SC材料只含板厚。");
+
+                if (_stopRequested) throw new OperationStoppedException();
+                if (!r.Saved) throw new Exception("文档保存未确认成功，请检查日志。");
+            });
         }
 
         /// <summary>
