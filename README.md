@@ -50,9 +50,10 @@ CAXA 3D 内置插件集合体（Add-in Host）与统一工具箱。CAXA 3D 中�
 | `caxa3dCXDFTViewUpdate` | 刷新图纸视图 | 批量打开 exb 图纸刷新视图后保存，图纸环境 CRX 桥 + 弹窗代点 + 后台化 |
 | `caxa3dexbtest` | 图纸环境矩形测试 | 图纸环境 CRX 桥接模块接入样例 |
 | `caxa3dapigetaddin` | 操作 API 抓取器 | 实时抓取用户操作对应的 ICAPI 调用，供二次开发参考 |
+| `caxa3dsetbackup` | 设置备份 | 备份/还原 CAXA 3D 设计环境与图纸环境配置，系统工具列 |
 | `caxa3didcskill` | 后台进程清理 | 独立插件列启动器，拉起进程外的 `caxa3didcskill.exe` 清理无窗口 IRONCAD 残留进程 |
 
-工具箱窗口按 `IPlugin.Category` 分三列表格排列：`1. 常用插件`（`BuiltIn`，6 个，含 `caxa3dCXDFTViewUpdate`）、`2. 独立插件`（`Independent`，`caxa3didcskill`）、`3. 测试插件`（`Test`，`Caxa3dcudeaddin`、`caxa3dAttributeManageraddin`、`caxa3dexbtest`、`caxa3dapigetaddin`）。
+工具箱窗口按 `IPlugin.Category` 分四列表格排列：`1. 常用插件`（`BuiltIn`，6 个，含 `caxa3dCXDFTViewUpdate`）、`2. 独立插件`（`Independent`，`caxa3didcskill`）、`3. 系统工具`（`SystemTool`，`caxa3dsetbackup` 设置备份）、`4. 测试插件`（`Test`，`Caxa3dcudeaddin`、`caxa3dAttributeManageraddin`、`caxa3dexbtest`、`caxa3dapigetaddin`）。
 
 > 独立插件的形态：`plugins\caxa3didcskill\` 里 DLL 只是**启动器**（不引用 ICAPI、不建窗口、不实现业务逻辑），点单元格时由它启动同目录的 `caxa3didcskill.exe`；已有实例则切前台，不重复启动。进程清理只能在进程外做（规则 16.6），EXE 源码在 `tools\caxa3didcskill\`，随安装包一起部署到 `plugins\caxa3didcskill\`。
 
@@ -82,6 +83,7 @@ caxa3dmytoolsaddin/
     ├── caxa3dCXDFTViewUpdate/      含 CRX 桥子工程（C++, caxa3dCXDFTViewUpdate.crx）
     ├── caxa3dexbtest/             含 CRX 桥子工程（C++）
     ├── caxa3dapigetaddin/         含 CRX 桥子工程（C++, caxa3dapicapture.crx）
+    ├── caxa3dsetbackup/           系统工具：配置备份/还原（仅移植内置插件内核）
     └── caxa3didcskill/            独立插件列启动器（拉起 tools 里的 EXE）
 
 tools/
@@ -133,7 +135,7 @@ plugins\<每个插件>\Lib\ICApiAddin.snk
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-流程：契约 -> 独立工具 EXE（`tools\caxa3didcskill`）-> 11 个子插件 -> 主程序 -> 清理并重建 `src/plugins/` 暂存目录（独立插件目录里同时落 DLL 与 EXE）。
+流程：契约 -> 独立工具 EXE（`tools\caxa3didcskill`）-> 12 个子插件 -> 主程序 -> 清理并重建 `src/plugins/` 暂存目录（独立插件目录里同时落 DLL 与 EXE）。
 
 编译后处理（自动）：主程序剥离 interop 的 `clrClass/clrSurrogate`、重新嵌入清单、`sn -R` 重签；子插件**不做**任何清单处理。
 

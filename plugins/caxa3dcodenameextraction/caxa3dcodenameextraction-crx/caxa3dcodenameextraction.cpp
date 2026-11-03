@@ -1,4 +1,4 @@
-// caxa3dcodenameextraction.cpp — CAXA 3D 2027 图纸环境 CRX 命令执行桥
+﻿// caxa3dcodenameextraction.cpp — CAXA 3D 2027 图纸环境 CRX 命令执行桥
 //
 // 作用：
 //   1) 隐藏 message-only 窗口 + 100ms 定时器，轮询请求文件
@@ -23,7 +23,11 @@
 //        CMD:TB_ABORT                 用户点「停止」：立刻终止标题栏 3D 信息的轮换派发与判定，
 //                                     释放临时选择集，回 REQ.tb-aborted（不再回 tb-result/tb-giveup）
 //        CMD:3DAPI                    零风险探针：只 GetProcAddress 记录 3D 信息相关导出是否存在
-//        CMD:CLOSEDOC|<fileName>      原生保存链（Ctrl+S 同路）+ WM_CLOSE 关闭文档
+//        CMD:CLOSEDOC|<fileName>      原生保存链（Ctrl+S 同路）+ WM_CLOSE，只关标题含
+//                                     该文件名的图纸视图子窗口；fileName 必填，
+//                                     一个都没匹配上就一个都不关（回 CLOSEDOC.name-mismatch）
+//        CMD:CLOSERAW|<fileName>      与 CLOSEDOC 同一套窗口匹配，但**不存盘**：只投 WM_CLOSE
+//                                     （图纸环境预热用的载体图纸没动过，用户要求不保存直接关）
 //        CMD:CLOSE                    crxedCommand 直调 CX_DFT_ViewClose
 //        CMD:SAVE                     crxedCommand 直调 CX_save（等待内层 CX_DFT_ViewSave）
 //        CMD:EXEC|<命令名>            按命令名直调（实测用）
@@ -446,12 +450,28 @@ static int SaveDocByCommand(const CStringW& fileName)
     return saved;
 }
 
-// 向「当前文档窗口」投递 WM_CLOSE。fileName 非空时优先只关标题含该文件名的
-// MDI 子窗口；一个都没匹配上则退化为关闭全部 MDI 子窗口。
+// 向「当前文档窗口」投递 WM_CLOSE。
+//
+// 铁律：只关标题含目标文件名的 MDI 子窗口，一个都没匹配上就什么都不关。
+// 早先这里有个「退化为关闭全部 MDI 子窗口」的兜底，11:29:17 实机把它引爆了：
+// 请求关 …内牙接头6666666666.exb，实际开着的是旧名 …内牙接头.exb ⇒ 未匹配 ⇒
+// 兜底把 2 个子窗口全关了，其中一个是 SC08020102.01 壳体.ics（3D 设计环境，
+// class Afx:…000E080B），整个设计环境被连带关掉。改名没成功时关错文件比不关文件
+// 严重得多，所以宁可回来报「没匹配上」，让人/C# 自己决定。
+// 另外只关 class 是 AfxFrameOrView140u（图纸视图）的子窗口，3D 场景子窗口永不关。
+static bool IsDrawingView(HWND h)
+{
+    wchar_t cls[64] = {0};
+    GetClassNameW(h, cls, 64);
+    return lstrcmpW(cls, L"AfxFrameOrView140u") == 0;
+}
+
 static int CloseDocWindows(const CStringW& fileName)
 {
     int closed = 0;
     int skippedNoMdi = 0;
+    int seenAll = 0;
+    CStringA seenTitles;
 
     for (HWND h = GetTopWindow(NULL); h; h = GetWindow(h, GW_HWNDNEXT))
     {
@@ -470,21 +490,21 @@ static int CloseDocWindows(const CStringW& fileName)
         if (!mdi)
         {
             skippedNoMdi++;
-            // 无 MDI 结构：只有顶层窗口标题里正好含目标文件名（=它就是当前文档窗口）
-            // 才投 WM_CLOSE；否则只记录，不贸然关闭，避免误杀整个图纸进程。
+            // 无 MDI 结构的顶层窗口 = CAXA 主框架（它的标题天然含当前文档名）。
+            // 按标题匹配就投 WM_CLOSE 等于关掉整个程序 —— 这条绝对禁止，只记录不操作。
             wchar_t wt[512] = {0};
             GetWindowTextW(h, wt, 512);
             CStringW t(wt);
             if (!fileName.IsEmpty() && t.Find(fileName.GetString()) >= 0)
             {
-                AppendLog("CLOSEDOC", "sdi-post", WinDesc(h));
-                PostMessageW(h, WM_CLOSE, 0, 0);
-                closed++;
+                CStringA s;
+                s.Format("顶层窗口标题含目标文件名，但它是主框架，按铁律不关：%s", WinDesc(h).GetString());
+                AppendLog("CLOSEDOC", "skip-mainframe", s);
             }
             continue;
         }
 
-        // 第一轮：按文件名精确匹配
+        // 只关标题含目标文件名的图纸视图子窗口
         int matched = 0, all = 0;
         HWND c = GetWindow(mdi, GW_CHILD);
         for (; c; c = GetWindow(c, GW_HWNDNEXT))
@@ -492,8 +512,20 @@ static int CloseDocWindows(const CStringW& fileName)
             wchar_t title[512] = {0};
             GetWindowTextW(c, title, 512);
             all++;
+            seenAll++;
+            if (seenTitles.GetLength() > 0) seenTitles += " | ";
+            seenTitles += WideToUtf8(title).GetString();
+
             CStringW t(title);
-            if (fileName.IsEmpty() || t.Find(fileName.GetString()) >= 0)
+            bool hit = !fileName.IsEmpty() && t.Find(fileName.GetString()) >= 0;
+            if (hit && !IsDrawingView(c))
+            {
+                CStringA s;
+                s.Format("标题匹配但不是图纸视图，跳过不关：%s", WinDesc(c).GetString());
+                AppendLog("CLOSEDOC", "skip-not-view", s);
+                continue;
+            }
+            if (hit)
             {
                 AppendLog("CLOSEDOC", "post", WinDesc(c));
                 PostMessageW(c, WM_CLOSE, 0, 0);
@@ -501,17 +533,11 @@ static int CloseDocWindows(const CStringW& fileName)
             }
         }
 
-        if (matched == 0 && all > 0)
+        if (matched == 0 && all > 0 && !fileName.IsEmpty())
         {
             CStringA s;
-            s.Format("文件名未匹配，退化为关闭全部 %d 个 MDI 子窗口", all);
-            AppendLog("CLOSEDOC", "fallback-all", s);
-            for (c = GetWindow(mdi, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT))
-            {
-                AppendLog("CLOSEDOC", "post", WinDesc(c));
-                PostMessageW(c, WM_CLOSE, 0, 0);
-                closed++;
-            }
+            s.Format("文件名未匹配，一个窗口都不关（本 MDI 子窗口共 %d 个：", all);
+            AppendLog("CLOSEDOC", "name-mismatch", s + seenTitles.GetString() + "】");
         }
     }
 
@@ -520,8 +546,8 @@ static int CloseDocWindows(const CStringW& fileName)
         CStringA firstTitle;
         int dlg = CountSelfDialogs(firstTitle);
         CStringA s;
-        s.Format("没找到可关的 MDI 子窗口（无 MDIClient 的顶层窗口数=%d 当前弹窗=%d first=%s）",
-                 skippedNoMdi, dlg, firstTitle.GetString());
+        s.Format("没找到可关的 MDI 子窗口（无 MDIClient 的顶层窗口数=%d 当前弹窗=%d first=%s 实开文档=%d:%s）",
+                 skippedNoMdi, dlg, firstTitle.GetString(), seenAll, seenTitles.GetString());
         AppendLog("CLOSEDOC", "no-window", s);
     }
     return closed;
@@ -961,6 +987,10 @@ static void ProbeCommandTable()
         L"CX_save",
         L"CX_save_Impl",
         L"CX_open_Impl",
+        // 「改变链接文件」的派发名（2024/2027 配置逐字相同；EditLinks 是键入别名）——
+        // ChangeLinksProbe 靠 CMD:SENDSTR 投它，这里登记是为了 CMDPROBE 能对着它取证
+        L"CX_DFT_ChangeLinks",
+        L"EditLinks",
         L"设置3D信息",
         L"3DSET",
     };
@@ -1403,6 +1433,14 @@ static void RefreshTickBody()
             if (p >= 0) fileName = raw.Mid(p + 1);
             fileName.Trim();
 
+            if (fileName.IsEmpty())
+            {
+                // 空文件名 = 「保存并关闭全部」，会把 3D 设计环境一起关掉，一律拒绝。
+                AppendLog("REQ", "closedoc-rejected",
+                          "CMD:CLOSEDOC 没带文件名，拒绝执行（关闭范围无法限定到单张图纸）");
+                return;
+            }
+
             g_pendingKind = kPendingClose;
             g_closeEnded  = false;
 
@@ -1424,6 +1462,42 @@ static void RefreshTickBody()
             s.Format("WM_CLOSE 投递给 %d 个文档窗口 file=%s", n,
                      fileName.IsEmpty() ? "<any>" : WideToUtf8(fileName).GetString());
             AppendLog("REQ", "closedoc-dispatched", s);
+        }
+        else if (cmd.Find("CMD:CLOSERAW") >= 0)
+        {
+            // 直接关闭（不存盘）：预热载体图纸没动过，CLOSEDOC 的 CX_save 链对它是多余动作；
+            // 窗口匹配/铁律与 CLOSEDOC 完全同一套（只关图纸视图子窗口，绝不碰顶层主框架）。
+            CStringW fileName;
+            int p = raw.Find(L'|');
+            if (p >= 0) fileName = raw.Mid(p + 1);
+            fileName.Trim();
+
+            if (fileName.IsEmpty())
+            {
+                AppendLog("REQ", "closeraw-rejected",
+                          "CMD:CLOSERAW 没带文件名，拒绝执行（关闭范围无法限定到单张图纸）");
+                return;
+            }
+
+            g_pendingKind = kPendingClose;
+            g_closeEnded  = false;
+
+            // 关图前先彻底停掉标题栏轮换（与 CLOSEDOC 同理：防残留在下一个文档上抢跑）
+            if (g_tbWanted || g_tbRunActive)
+            {
+                g_tbWanted    = false;
+                g_tbTrying    = false;
+                g_tbRunActive = false;
+                if (g_tbSetValid) { crxedSSFree(g_tbSet); g_tbSetValid = false; }
+                AppendLog("REQ", "tb-stopped-on-close", "关闭文档前停止标题栏轮换");
+            }
+
+            LogDocModified(fileName);
+            int n = CloseDocWindows(fileName);
+            CStringA s;
+            s.Format("WM_CLOSE 投递给 %d 个文档窗口（不保存） file=%s", n,
+                     WideToUtf8(fileName).GetString());
+            AppendLog("REQ", "closeraw-dispatched", s);
         }
         else if (cmd.Find("CMD:CLOSE") >= 0)
         {
