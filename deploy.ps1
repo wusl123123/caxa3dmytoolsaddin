@@ -18,7 +18,7 @@ param(
     [string]$WorkRoot = ''
 )
 
-$ScriptVersion = '2026-10-31.1'
+$ScriptVersion = '2026-11-02.1'
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = if ($WorkRoot) { $WorkRoot } else { $PSScriptRoot }
@@ -55,18 +55,36 @@ $idcPluginName = 'caxa3didcskill'
 $idcExeName    = 'caxa3didcskill.exe'
 
 # ================================================================ 定位安装位置
-# CAXA 3D 不一定装在 C 盘。探测顺序（全部命中后按「存在 <年份>\bin」校验、去重）：
+# CAXA 3D 不一定装在 C 盘。探测顺序（全部命中后用 Test-CaxaVersionDir 校验、去重）：
 #   0) 环境变量 CAXA3D_ROOT（手工指定根目录，最高优先级，命中即不再扫描其余来源）
 #   1) 注册表 HKLM/HKCU\SOFTWARE[+WOW6432Node]\CAXA\CAXA 3D\<ver>\InstallDir
 #      （本机实测值形如 <根>\2027\，即年份版本目录，取其父目录为根）
 #   2) 卸载表 Uninstall\* 中 DisplayName 匹配 CAXA 3D 的 InstallLocation
 #   3) 各固定盘 <盘>:\Program Files\CAXA\CAXA 3D
 #   4) 兜底 C:\Program Files\CAXA\CAXA 3D
+# 每个候选都必须通过 Test-CaxaVersionDir（4 位年份目录 + bin + Config\IronCad.Addin.config）：
+# 只认完整安装的 CAXA 3D。CAXA ICS VIEWER 等旁系产品同样是 <根>\<年份>\bin 布局，
+# 但没有 Config\IronCad.Addin.config（第三方机器实测），一律排除。
+# 判据（三条同时成立才算真·CAXA 3D）：
+#   1) 目录名是 4 位年份；2) 有 bin；3) 有 Config\IronCad.Addin.config
+# 第 3 条是 2026-11-02 第三方机器事故后加的：那台机器上装了 CAXA ICS VIEWER，
+# 目录是 C:\Program Files\CAXA\CAXA ICS VIEWER\2027\bin —— 只测 bin 会把 Viewer 认成 CAXA 3D，
+# 随后「缺少 ...\Config\IronCad.Addin.config」→ 校验阶段 Select-String 抛 PathNotFound 中断安装。
+function Test-CaxaVersionDir([string]$dir) {
+    if ([string]::IsNullOrWhiteSpace($dir)) { return $false }
+    $dir = $dir.TrimEnd('\', '/')
+    if ((Split-Path -Leaf $dir) -notmatch '^\d{4}$') { return $false }
+    if ($dir -match '(?i)ICS\s*VIEWER') { return $false }        # 旁系产品直接排除
+    if (-not (Test-Path -LiteralPath (Join-Path $dir 'bin'))) { return $false }
+    if (-not (Test-Path -LiteralPath (Join-Path $dir 'Config\IronCad.Addin.config'))) { return $false }
+    return $true
+}
+
 function Test-CaxaRoot([string]$root) {
     if ([string]::IsNullOrWhiteSpace($root)) { return $false }
     try {
-        foreach ($v in @(Get-ChildItem $root -Directory -ErrorAction SilentlyContinue)) {
-            if ($v.Name -match '^\d+$' -and (Test-Path (Join-Path $v.FullName 'bin'))) { return $true }
+        foreach ($v in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue)) {
+            if (Test-CaxaVersionDir $v.FullName) { return $true }
         }
     } catch { }
     return $false
@@ -134,11 +152,17 @@ function Get-CaxaVersionDirs {
         if ($seenRoot.ContainsKey($rk)) { continue }
         $seenRoot[$rk] = $true
 
-        # 情形 A：候选本身就是版本目录（…\<年份>，其下有 bin）→ 直接入列，不再当根往下扫
-        if ((Split-Path -Leaf $r) -match '^\d+$' -and (Test-Path (Join-Path $r 'bin'))) {
-            if (-not $seenVer.ContainsKey($rk)) {
-                $seenVer[$rk] = $true
-                $versions += (Get-Item -LiteralPath $r)
+        # 情形 A：候选本身就是版本目录（…\<年份>）→ 通过 Test-CaxaVersionDir 才入列，不再当根往下扫
+        if ((Split-Path -Leaf $r) -match '^\d{4}$') {
+            if (Test-CaxaVersionDir $r) {
+                if (-not $seenVer.ContainsKey($rk)) {
+                    $seenVer[$rk] = $true
+                    $versions += (Get-Item -LiteralPath $r)
+                }
+            } else {
+                if (Test-Path (Join-Path $r 'bin')) {
+                    Write-Host ("  跳过非完整 CAXA 3D 版本目录：{0}（有 bin 但缺 Config\IronCad.Addin.config，典型如 CAXA ICS VIEWER）" -f $r) -ForegroundColor DarkYellow
+                }
             }
             continue
         }
@@ -146,21 +170,28 @@ function Get-CaxaVersionDirs {
         # 情形 B：候选是安装根（其下有 <年份>\bin）
         if (-not (Test-CaxaRoot $r)) { continue }
         foreach ($v in @(Get-ChildItem -LiteralPath $r -Directory -ErrorAction SilentlyContinue)) {
-            if ($v.Name -notmatch '^\d+$') { continue }
-            if (-not (Test-Path (Join-Path $v.FullName 'bin'))) { continue }
+            if ($v.Name -notmatch '^\d{4}$') { continue }
+            if (-not (Test-CaxaVersionDir $v.FullName)) {
+                # 有 <年份>\bin 却不是完整 CAXA 3D（典型：C:\Program Files\CAXA\CAXA ICS VIEWER\2027）→ 留痕跳过
+                if (Test-Path (Join-Path $v.FullName 'bin')) {
+                    Write-Host ("  跳过非 CAXA 3D 目录：{0}（无 Config\IronCad.Addin.config）" -f $v.FullName) -ForegroundColor DarkYellow
+                }
+                continue
+            }
             $vk = $v.FullName.ToLower()
             if ($seenVer.ContainsKey($vk)) { continue }
             $seenVer[$vk] = $true
             $versions += $v
         }
     }
+    if ($versions.Count -eq 0) { return [object[]]@() }   # @($null | Sort-Object) 会得到 1 个 $null，必须显式返回空数组
     return ,@($versions | Sort-Object Name)   # 按版本目录名升序，输出稳定
 }
 
 # 已并入集合体的旧插件：部署时撤销其独立登记
-$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll')
-$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate')
-$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}')
+$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dsetbackup.dll')
+$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dsetbackup')
+$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{AB914DC2-7500-4BBE-BEFF-E94A6A742079}')
 
 # 图纸环境 CRX 桥：插件目录 -> 随包 .crx（[3b/5] 逐个拷进 CAXADraft\bin 并登记 CxAutorun.cx）
 $crxItems = @(
@@ -483,6 +514,8 @@ $versions = Get-CaxaVersionDirs
 if ($versions.Count -eq 0) {
     Write-Host "[错误] 未在本机找到 CAXA 3D 安装目录（已查注册表 InstallDir、卸载表、各固定盘 Program Files；" -ForegroundColor Red
     Write-Host "       如安装在非常规位置，请设置环境变量 CAXA3D_ROOT 指向安装根目录后重试）" -ForegroundColor Red
+    Write-Host "       提示：CAXA ICS VIEWER 等旁系产品（无 Config\IronCad.Addin.config）会被自动排除，" -ForegroundColor Yellow
+    Write-Host "             如本机确实只装了 Viewer，本插件无处可装，属正常提示。" -ForegroundColor Yellow
     Read-Host '按回车退出'
     exit 1
 }
@@ -492,6 +525,7 @@ Write-Host ("发现版本目录：{0}" -f (($versions | ForEach-Object { $_.Name
 Write-Host ""
 
 $hadError = $false
+$deployed = @()          # 真正装成功的版本；校验只遍历它，避免对残缺目录做 Select-String
 
 foreach ($v in $versions) {
     $year         = $v.Name
@@ -675,21 +709,26 @@ foreach ($v in $versions) {
     } catch {
         Write-Host "[4/5] 登记失败：$($_.Exception.Message)" -ForegroundColor Red
         $hadError = $true
+        continue
     }
+    $deployed += $v
     Write-Host ""
 }
 
 # ---------- 读回校验 ----------
+# 只校验真正装成功的版本：前面因缺 config/manifest 被 continue 掉的版本若仍在此遍历，
+# Select-String 会对不存在的路径抛 PathNotFound（ErrorActionPreference=Stop 下直接中断）。
 Write-Host "================ 部署校验 ================"
-foreach ($v in $versions) {
+if ($deployed.Count -eq 0) { Write-Host "没有成功部署的版本，跳过读回校验。" -ForegroundColor Yellow }
+foreach ($v in $deployed) {
     $caxaBin      = Join-Path $v.FullName 'bin'
     $configFile   = Join-Path $v.FullName 'Config\IronCad.Addin.config'
     $manifestFile = Join-Path $caxaBin 'IronCad.exe.manifest'
     $verTag       = '{0}.0' -f ([int]$v.Name - 1998)
 
     $okFile = Test-Path (Join-Path $caxaBin "$hostName.dll")
-    $okCfg  = (Select-String -Path $configFile -Pattern "$hostName.dll" -SimpleMatch -ErrorAction SilentlyContinue) -ne $null
-    $okDep  = (-not $hasManifest) -or ((Select-String -Path $manifestFile -Pattern "`"$hostName`"" -SimpleMatch -ErrorAction SilentlyContinue) -ne $null)
+    $okCfg  = (Test-Path $configFile) -and ((Select-String -Path $configFile -Pattern "$hostName.dll" -SimpleMatch -ErrorAction SilentlyContinue) -ne $null)
+    $okDep  = (-not $hasManifest) -or ((Test-Path $manifestFile) -and ((Select-String -Path $manifestFile -Pattern "`"$hostName`"" -SimpleMatch -ErrorAction SilentlyContinue) -ne $null))
     $okReg  = Test-Path "HKCU:\SOFTWARE\CAXA\CAXA 3D $verTag\Applications\$hostName"
     $okCrxList = @()
     foreach ($crxItem in $crxItems) {

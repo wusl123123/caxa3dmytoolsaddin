@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
 using interop.ICApiIronCAD;
 
@@ -51,9 +52,11 @@ namespace caxa3dcodenameextraction
     /// vtable 槽位号取自类型库 FUNCDESC（x64 下偏移 = 槽位 × 8）。
     ///   IZBaseApp:        ActiveDoc = 11
     ///   IZDoc:            get_Name = 11
-    ///   IZSceneDoc:       get_SelectionMgr = 27
+    ///   IZSceneDoc:       get_SelectionMgr = 27, GetFirstChild = 24, GetNextChild = 25,
+    ///                     GetTopElement = 58
     ///   IZSelectionMgr:   GetSelectedElements = 10, SelectionsAvailable = 17,
-    ///                     GetSelectedElementsZArray = 19
+    ///                     GetSelectedElementsZArray = 19, AddElementToSelection = 20
+    ///   IZElement:        GetChildrenZArray = 21
     ///   IZArray:          Count = 7, Get = 9
     ///   IZElement:        get_Type = 7, get_Name = 9, get_CustomPropMgr = 24,
     ///                     GetCustomPropManager = 42
@@ -70,10 +73,14 @@ namespace caxa3dcodenameextraction
         // ---- 接口 GUID ----
         private static readonly Guid IID_IZBaseApp = new Guid("A5B9AF7D-228B-4ED1-BA42-D51318F7EA20");
         private static readonly Guid IID_IZSceneDoc = new Guid("3845C6DA-89D6-43F7-8B10-4BE36E0E758B");
+        private static readonly Guid IID_IZDrawingDoc = new Guid("A7C6ECCB-D616-45F4-8E79-AF5DE63D3895");
         private static readonly Guid IID_IZDoc = new Guid("408F2326-F171-443B-A9EF-4AB250A2B1A8");
         private static readonly Guid IID_IZElement = new Guid("69EF5583-A26D-4913-A2F6-DBFF73E1B8A3");
         private static readonly Guid IID_IZPart = new Guid("F20F2411-05C4-4CA6-B2B4-5DB29531EDD7");
         private static readonly Guid IID_IZAssembly = new Guid("FF7C2F47-F21F-4225-9027-58E66CC01860");
+        private static readonly Guid IID_IZSheetMetalPart = new Guid("05667879-65CD-4417-AFB8-16E09A669D06");
+        private static readonly Guid IID_IZConfigurationMgr = new Guid("4FDA96C8-058E-4977-8A1F-FA2CCDBFF315");
+        private static readonly Guid IID_IZConfiguration = new Guid("7AFFA1E0-F43D-47DA-9AA2-9FC9C7F587D7");
 
         // ---- vtable 槽位（已通过本机 ICApiIronCAD.tlb 与内嵌 TLB 的 FUNCDESC 核对）----
         private const int SlotActiveDoc = 11;            // IZBaseApp
@@ -81,6 +88,9 @@ namespace caxa3dcodenameextraction
         private const int SlotSceneSelectionMgr = 27;    // IZSceneDoc::get_SelectionMgr -> IZSelectionMgr
         private const int SlotSelMgrGetSelectedElements = 10;       // -> VARIANT(SAFEARRAY)（仅 ZArray 不可用时回退）
         private const int SlotSelMgrGetSelectedElementsZArray = 19; // -> IZArray*（主路径）
+        // 原生「替换零件/装配」只认 CAXA 自己的活选择集，投递前用它把选中件重新加入选择集
+        private const int SlotSelMgrAddElementToSelection = 20;     // IZSelectionMgr::AddElementToSelection(IZElement, Boolean vbIgnoreFilter)
+        private const int SlotSelMgrRemoveAllFromSelection = 22;    // IZSelectionMgr::RemoveAllFromSelection
         private const int SlotArrayCount = 7;            // IZArray::Count(int*)
         private const int SlotArrayGet = 9;              // IZArray::Get(int index, out IZElement*)
         private const int SlotElemGetType = 7;           // IZElement
@@ -94,13 +104,33 @@ namespace caxa3dcodenameextraction
         private const int SlotDocSave = 9;                // IZDoc::Save
         private const int SlotElemSetName = 10;           // IZElement::set_Name
         private const int SlotPartGetExtLinkedInfo = 17;  // IZPart::GetExternallyLinkedInfo
+        private const int SlotPartUpdate = 7;             // IZPart::Update()
         private const int SlotPartRegenerate = 18;        // IZPart::Regenerate()
         private const int SlotAsmGetExtLinkedInfo = 21;   // IZAssembly::GetExternallyLinkedInfo
+        private const int SlotAsmUpdate = 7;              // IZAssembly::Update()
         private const int SlotAsmRegenerateParts = 17;    // IZAssembly::RegenerateParts(VARIANT_BOOL)
         private const int SlotSceneRegenerateParts = 21;  // IZSceneDoc::RegenerateParts(VARIANT_BOOL)
         private const int SlotSceneUpdate = 36;           // IZSceneDoc::Update()
         private const int SlotSceneUpdateGraphics = 83;   // IZSceneDoc::UpdateGraphics(UInt32)
         private const int SlotSceneUpdateBrowser = 84;    // IZSceneDoc::UpdateBrowser(UInt32)
+        // 钣金件 Update 后会被切到展开配置（坑 111），收尾必须回折叠态：先 Refold，失败退激活默认配置
+        private const int SlotSmRefold = 8;               // IZSheetMetalPart::Refold()
+        private const int SlotSceneGetConfigurationMgr = 40; // IZSceneDoc::get_ConfigurationMgr
+        private const int SlotCfgMgrDefault = 12;         // IZConfigurationMgr::get_DefaultConfiguration
+        private const int SlotCfgGetName = 7;             // IZConfiguration::get_Name
+        private const int SlotCfgActivate = 15;           // IZConfiguration::Activate(Boolean bUpdateAllConfigsFirst)
+        // 来源：_probe-tools\out\tlb\2027\members.csv（2024 表同槽，跨版本一致）
+        //   IZPart::SaveAs(String bstrFileName, Boolean vbLinkToScene)  → 槽 16
+        //   IZAssembly::SaveAs(同上)                                     → 槽 14
+        private const int SlotPartSaveAs = 16;            // IZPart::SaveAs
+        private const int SlotAsmSaveAs = 14;             // IZAssembly::SaveAs
+        // 设计树遍历（不读活选择）：_probe-tools\out\tlb\2027\members.csv 同表核对
+        //   GetFirstChild / GetNextChild 是**无参**成对迭代器，游标状态挂在文档对象上
+        //   GetTopElement 用作迭代器不可用时的兜底根
+        private const int SlotSceneGetFirstChild = 24;        // IZSceneDoc::GetFirstChild
+        private const int SlotSceneGetNextChild = 25;         // IZSceneDoc::GetNextChild
+        private const int SlotSceneGetTopElement = 58;        // IZSceneDoc::GetTopElement
+        private const int SlotElemGetChildrenZArray = 21;     // IZElement::GetChildrenZArray
 
         // ZIronCADApp 属性在默认接口上的 DISPID
         private const int DispidZIronCADApp = 0x2A;
@@ -148,6 +178,9 @@ namespace caxa3dcodenameextraction
         private delegate int FnArrayGet(IntPtr self, int index, out IntPtr ppElem);
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int FnAddElementToSelection(IntPtr self, IntPtr pElement, short vbIgnoreFilter);
+
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate int FnGetVariantResult(IntPtr self, IntPtr pvarResult);
 
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
@@ -182,6 +215,11 @@ namespace caxa3dcodenameextraction
         /// <summary>GetExternallyLinkedInfo(VARIANT_BOOL* linked, BSTR* retval)。</summary>
         [UnmanagedFunctionPointer(CallingConvention.StdCall)]
         private delegate int FnGetLinkedInfo(IntPtr self, out short linked, out IntPtr pbstrName);
+
+        /// <summary>SaveAs(BSTR 文件名, VARIANT_BOOL 回链到场景)。</summary>
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+        private delegate int FnSaveAsLinked(IntPtr self,
+            [MarshalAs(UnmanagedType.BStr)] string bstrFileName, short vbLinkToScene);
 
         [DllImport("oleaut32.dll")] private static extern int VariantClear(IntPtr pvarg);
         [DllImport("oleaut32.dll")] private static extern int SafeArrayGetLBound(IntPtr psa, int nDim, out int pLbound);
@@ -236,6 +274,61 @@ namespace caxa3dcodenameextraction
         {
             FnGetObj fn = (FnGetObj)Marshal.GetDelegateForFunctionPointer(Slot(pIface, slot), typeof(FnGetObj));
             return fn(pIface, out ppv);
+        }
+
+        /// <summary>
+        /// 带槽位防护的“[out,retval] 接口指针”无参调用：越界槽位（短 vtable 代理）直接判失败，
+        /// 绝不发起调用。用于遍历设计树这类要连打十几个槽位的热路径。
+        /// </summary>
+        private static bool TryCallObjSafe(IntPtr pIface, int slot, string what, out IntPtr ppv)
+        {
+            ppv = IntPtr.Zero;
+            try
+            {
+                IntPtr fn = Slot(pIface, slot);
+                if (!LooksCallable(fn))
+                {
+                    Diagnostics.Trace(what + " 跳过：slot " + slot + " 函数指针无效（短 vtable 代理）");
+                    return false;
+                }
+                FnGetObj f = (FnGetObj)Marshal.GetDelegateForFunctionPointer(fn, typeof(FnGetObj));
+                int hr = f(pIface, out ppv);
+                Diagnostics.Trace(string.Format("{0} hr=0x{1:X} ptr=0x{2:X}",
+                    what, hr, ppv.ToInt64()));
+                if (hr != 0 && ppv != IntPtr.Zero)
+                {
+                    Marshal.Release(ppv);
+                    ppv = IntPtr.Zero;
+                }
+                return ppv != IntPtr.Zero;
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.Log(what + " EX: " + ex.Message);
+                ppv = IntPtr.Zero;
+                return false;
+            }
+        }
+
+        /// <summary>IZArray::Count（槽 7）。失败或越界槽位返回 0。</summary>
+        private static int ZArrayCount(IntPtr pArr)
+        {
+            IntPtr fn = Slot(pArr, SlotArrayCount);
+            if (!LooksCallable(fn)) return 0;
+            FnGetInt cnt = (FnGetInt)Marshal.GetDelegateForFunctionPointer(fn, typeof(FnGetInt));
+            int count;
+            return cnt(pArr, out count) == 0 && count > 0 ? count : 0;
+        }
+
+        /// <summary>IZArray::Get（槽 9）。返回的指针由调用方 Release。</summary>
+        private static bool ZArrayGet(IntPtr pArr, int index, out IntPtr pRaw)
+        {
+            pRaw = IntPtr.Zero;
+            IntPtr fn = Slot(pArr, SlotArrayGet);
+            if (!LooksCallable(fn)) return false;
+            FnArrayGet get = (FnArrayGet)Marshal.GetDelegateForFunctionPointer(fn, typeof(FnArrayGet));
+            int hr = get(pArr, index, out pRaw);
+            return hr == 0 && pRaw != IntPtr.Zero;
         }
 
         /// <summary>
@@ -409,6 +502,36 @@ namespace caxa3dcodenameextraction
 
             Diagnostics.Log("session accepted (in-process)");
             return new CaxaSession { AppObject = appObj, BaseApp = pBase };
+        }
+
+        /// <summary>
+        /// 这个文档是不是图纸文档（QI IZDrawingDoc）。
+        /// 为什么还要单独问一次：功能区代点「新图纸」之后插件手上没有对象引用，只能从
+        /// GetAllOpenDocs 的差集里挑，而挑错一张就会在收尾时关掉用户自己的文档
+        /// （实机 19:02/19:42 证明图纸环境里 ActiveDoc 回的是模型文档「设计1」，
+        /// 靠它判据根本不成立）⇒ 类型 + QI + 差集三条同时过才接管。
+        /// </summary>
+        public static bool IsDrawingDoc(IZDoc doc)
+        {
+            if (doc == null) return false;
+            IntPtr pUnk = IntPtr.Zero, pDrawing = IntPtr.Zero;
+            try
+            {
+                pUnk = Marshal.GetIUnknownForObject(doc);
+                Guid iid = IID_IZDrawingDoc;
+                return Marshal.QueryInterface(pUnk, ref iid, out pDrawing) == 0 &&
+                       pDrawing != IntPtr.Zero;
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.Log("IsDrawingDoc 异常：" + ex.Message);
+                return false;
+            }
+            finally
+            {
+                if (pDrawing != IntPtr.Zero) Marshal.Release(pDrawing);
+                if (pUnk != IntPtr.Zero) Marshal.Release(pUnk);
+            }
         }
 
         /// <summary>
@@ -1173,6 +1296,8 @@ namespace caxa3dcodenameextraction
                     }
                     info.ElementName = TryReadBstrProp(pElem, SlotElemGetName, "IZElement.get_Name(info)") ?? "";
                     TryReadExternalLink(pElem, info.ElementType, info);
+                    Diagnostics.LogPoll("选中件: type=" + info.ElementType + "(" + info.ElementKind +
+                        ") name=[" + info.ElementName + "] 链接=" + (info.ExternallyLinked ? info.LinkedFile : "(无)"));
                 }
                 finally
                 {
@@ -1187,36 +1312,726 @@ namespace caxa3dcodenameextraction
             return info;
         }
 
-        /// <summary>IZPart/IZAssembly::GetExternallyLinkedInfo → 外部链接 .ics 路径。</summary>
-        private static void TryReadExternalLink(IntPtr pElem, int elemType, SelectedPartInfo info)
+        /// <summary>
+        /// IZPart/IZAssembly::GetExternallyLinkedInfo → 外部链接 .ics 路径。
+        /// 只有「hr=0 且 linked=true 且路径非空」才返回路径，其余一律 null。
+        /// </summary>
+        private static string ReadLinkedFile(IntPtr pElem, int elemType)
         {
             // 装配体走 IZAssembly，其余（零件/钣金/刻面/线框/轮廓等）一律尝试 IZPart
             Guid iid = elemType == 2 ? IID_IZAssembly : IID_IZPart;
             int slot = elemType == 2 ? SlotAsmGetExtLinkedInfo : SlotPartGetExtLinkedInfo;
             IntPtr pObj;
-            if (TryQI(pElem, iid, out pObj) != 0 || pObj == IntPtr.Zero) return;
+            if (TryQI(pElem, iid, out pObj) != 0 || pObj == IntPtr.Zero) return null;
             try
             {
                 IntPtr fn = Slot(pObj, slot);
-                if (!LooksCallable(fn)) return;
+                if (!LooksCallable(fn)) return null;
                 FnGetLinkedInfo f = (FnGetLinkedInfo)Marshal.GetDelegateForFunctionPointer(
                     fn, typeof(FnGetLinkedInfo));
                 short linked;
                 IntPtr pbstr;
                 int hr = f(pObj, out linked, out pbstr);
-                Diagnostics.Trace(string.Format("GetExternallyLinkedInfo(type={0}) hr=0x{1:X} linked={2}",
-                    elemType, hr, linked));
+                // 逐节点审计只在 VerboseWalk 打开时落盘：11-03 实测一次走查 4002 节点全打，
+                // 单轮日志 1.3 万行里 84% 是这一行，把「设计树定位」和 ④/⑥ 取证全埋掉了。
+                if (Diagnostics.VerboseWalk)
+                    Diagnostics.Trace(string.Format("GetExternallyLinkedInfo(type={0}) hr=0x{1:X} linked={2}",
+                        elemType, hr, linked));
+                string path = null;
                 if (hr == 0 && pbstr != IntPtr.Zero)
                 {
-                    try { info.LinkedFile = Marshal.PtrToStringBSTR(pbstr) ?? ""; }
+                    try { path = Marshal.PtrToStringBSTR(pbstr); }
                     finally { Marshal.FreeBSTR(pbstr); }
                 }
-                info.ExternallyLinked = hr == 0 && linked != 0
-                    && !string.IsNullOrEmpty(info.LinkedFile);
+                if (hr != 0 || linked == 0 || string.IsNullOrEmpty(path)) return null;
+                return path;
             }
             finally
             {
                 Marshal.Release(pObj);
+            }
+        }
+
+        /// <summary>把元素的外链信息写进 SelectedPartInfo（不改变“未链接”时的空值语义）。</summary>
+        private static void TryReadExternalLink(IntPtr pElem, int elemType, SelectedPartInfo info)
+        {
+            string path = ReadLinkedFile(pElem, elemType);
+            if (path == null) return;
+            info.LinkedFile = path;
+            info.ExternallyLinked = true;
+        }
+
+        /// <summary>
+        /// 带图独立第 ③ 步的**首选**做法：把选中零部件另存为新文件，并让**当前这个元素**回链到它
+        /// （IZPart::SaveAs(file, true) / IZAssembly::SaveAs(file, true)）。
+        /// 与原生「替换零件/装配」命令的差别（实机日志 11:39:56 实证）：那条命令会换一个元素对象，
+        /// 钣金零件(type=20) 被替成普通零件(type=1)，共享属性管理器随之 SetValueByName=E_FAIL；
+        /// 本调用不动元素对象，类型、位姿、父子关系与属性管理器全部保留，其它共享旧链接的实例仍指旧文件。
+        /// 返回 hr==0 只代表调用被接受，最终判据仍要看链接是否真变（调用方轮询）。
+        /// </summary>
+        public static bool SaveSelectedPartToNewFileAndRelink(CaxaSession session, string newPath, out string error)
+        {
+            error = null;
+            if (session == null || string.IsNullOrEmpty(newPath))
+            {
+                error = "参数为空。";
+                return false;
+            }
+
+            IntPtr pDoc, pScene;
+            OpenActiveScene(session, out pDoc, out pScene);
+            try
+            {
+                if (pDoc == IntPtr.Zero) { error = "没有活动文档。"; return false; }
+                IntPtr pElem = GetSelectedElement(pScene, "saveas");
+                if (pElem == IntPtr.Zero) { error = "当前没有选中零部件。"; return false; }
+                try
+                {
+                    int elemType;
+                    if (!TryReadIntProp(pElem, SlotElemGetType, "IZElement.get_Type(saveas)", out elemType))
+                        elemType = 1;
+
+                    // 装配体走 IZAssembly(槽 14)，其余（零件/钣金/刻面/线框/轮廓）走 IZPart(槽 16)
+                    Guid iid = elemType == 2 ? IID_IZAssembly : IID_IZPart;
+                    int slot = elemType == 2 ? SlotAsmSaveAs : SlotPartSaveAs;
+                    IntPtr pObj;
+                    if (TryQI(pElem, iid, out pObj) != 0 || pObj == IntPtr.Zero)
+                    {
+                        error = "选中元素不支持 " + (elemType == 2 ? "IZAssembly" : "IZPart") + "::SaveAs。";
+                        return false;
+                    }
+                    try
+                    {
+                        IntPtr fn = Slot(pObj, slot);
+                        if (!LooksCallable(fn)) { error = "slot " + slot + " 不可调用。"; return false; }
+                        FnSaveAsLinked f = (FnSaveAsLinked)Marshal.GetDelegateForFunctionPointer(
+                            fn, typeof(FnSaveAsLinked));
+                        int hr = f(pObj, newPath, (short)-1);   // VARIANT_BOOL true = -1
+                        Diagnostics.Trace(string.Format(
+                            "SaveAs(type={0} 槽{1}) \"{2}\" hr=0x{3:X}", elemType, slot, newPath, hr));
+                        if (hr != 0)
+                        {
+                            error = "IZ" + (elemType == 2 ? "Assembly" : "Part") + "::SaveAs 返回 0x" +
+                                hr.ToString("X");
+                            return false;
+                        }
+                        return true;
+                    }
+                    finally { Marshal.Release(pObj); }
+                }
+                finally { Marshal.Release(pElem); }
+            }
+            finally
+            {
+                if (pScene != IntPtr.Zero) Marshal.Release(pScene);
+                if (pDoc != IntPtr.Zero) Marshal.Release(pDoc);
+            }
+        }
+
+        /// <summary>
+        /// 把当前选中的零部件重新按回 CAXA 自己的选择集（IZSelectionMgr::AddElementToSelection，槽 20）。
+        /// 原生「替换零件/装配」的帮助串是「替换选择的外部链接零件/装配」——它只认活选择，
+        /// 投递前不补这一步，命令会安静地什么都不做（实机 11:38 那轮 74 秒空等）。
+        /// </summary>
+        public static bool ReassertNativeSelection(CaxaSession session, out string error)
+        {
+            error = null;
+            IntPtr pDoc, pScene;
+            OpenActiveScene(session, out pDoc, out pScene);
+            try
+            {
+                if (pDoc == IntPtr.Zero) { error = "没有活动文档。"; return false; }
+                IntPtr fn = Slot(pScene, SlotSceneSelectionMgr);
+                if (!LooksCallable(fn)) { error = "get_SelectionMgr 不可调用。"; return false; }
+                FnGetObj fSel = (FnGetObj)Marshal.GetDelegateForFunctionPointer(fn, typeof(FnGetObj));
+                IntPtr pSelMgr;
+                int hr = fSel(pScene, out pSelMgr);
+                if (hr != 0 || pSelMgr == IntPtr.Zero)
+                {
+                    error = "取不到 IZSelectionMgr（hr=0x" + hr.ToString("X") + "）。";
+                    return false;
+                }
+                try
+                {
+                    IntPtr pElem = GetSelectedElement(pScene, "reassert");
+                    if (pElem == IntPtr.Zero)
+                    {
+                        error = "当前没有选中零部件，原生替换命令没有作用对象。";
+                        return false;
+                    }
+                    try
+                    {
+                        IntPtr f2 = Slot(pSelMgr, SlotSelMgrAddElementToSelection);
+                        if (!LooksCallable(f2)) { error = "槽 20 不可调用。"; return false; }
+                        FnAddElementToSelection add =
+                            (FnAddElementToSelection)Marshal.GetDelegateForFunctionPointer(
+                                f2, typeof(FnAddElementToSelection));
+                        int hr2 = add(pSelMgr, pElem, (short)-1);   // vbIgnoreFilter = true
+                        Diagnostics.Trace(string.Format(
+                            "ReassertNativeSelection: AddElementToSelection(槽20) hr=0x{0:X}", hr2));
+                        if (hr2 != 0) error = "AddElementToSelection 返回 0x" + hr2.ToString("X");
+                        return hr2 == 0;
+                    }
+                    finally { Marshal.Release(pElem); }
+                }
+                finally { Marshal.Release(pSelMgr); }
+            }
+            finally
+            {
+                if (pScene != IntPtr.Zero) Marshal.Release(pScene);
+                if (pDoc != IntPtr.Zero) Marshal.Release(pDoc);
+            }
+        }
+
+        /// <summary>
+        /// 替换刚结束时把新元素按回活选择（IZSelectionMgr::RemoveAllFromSelection 槽 22 +
+        /// AddElementToSelection 槽 20）。**这条写选择等于替 CAXA 收尾**：实机 16:40~16:42 五轮
+        /// 都做了这一步，流程走完主界面照常可点；17:11/17:23 两轮把它删掉，流程一释放独占
+        /// 主界面与插件窗口就一起点不动（收尾快照里没有模态框、主框架也没被禁用）。
+        /// 但它确实会失败：实机 16:38:51 场景正在重建，指针作废抛 SEHException(0x80004005)。
+        /// 所以这里**只记日志、绝不抛异常**，失败绝不能把已经成功的替换判成失败。
+        /// </summary>
+        public static bool SelectLinkedElement(CaxaSession session, string icsPath, out string error)
+        {
+            // 为什么要重试：原生「替换零件/装配」的插入例程是在我们点掉「确定」之后还在继续跑的。
+            // 实机 18:41:59.942 投出确定 → 标出 59.961 设计树已能命中 → 59.997 写选择就抛
+            // SEHException（整个场景里只剩 55 ms，元素指针已经被替换例程作废）。
+            // 每一步都用**重新遍历设计树**拿到的当前指针，所以隔一会儿再来一次就能成，
+            // 而这一步成不成，直接决定流程结束后主界面还点不点得动（见方法注释）。
+            string last = null;
+            error = null;
+            for (int attempt = 1; attempt <= 3; attempt++)
+            {
+                if (SelectLinkedElementOnce(session, icsPath, out last)) return true;
+                Diagnostics.Log("SelectLinkedElement: 第 " + attempt + " 次没成（" + last +
+                    "），等一下重来");
+                if (attempt < 3)
+                {
+                    // 场景重建：给 CAXA 时间把替换例程走完，再重新取指针写选择
+                    System.Threading.Thread.Sleep(500);
+                }
+            }
+            error = last;
+            return false;
+        }
+
+        private static bool SelectLinkedElementOnce(CaxaSession session, string icsPath, out string error)
+        {
+            error = null;
+            IntPtr pDoc, pScene;
+            try
+            {
+                OpenActiveScene(session, out pDoc, out pScene);
+            }
+            catch (Exception ex) { error = ex.Message; return false; }
+            try
+            {
+                if (pDoc == IntPtr.Zero || pScene == IntPtr.Zero)
+                {
+                    error = "没有活动文档。";
+                    return false;
+                }
+                _walkNodes = 0;
+                IntPtr pElem = FindLinkedElementPointer(pScene,
+                    Path.GetFileNameWithoutExtension(icsPath));
+                if (pElem == IntPtr.Zero)
+                {
+                    error = "设计树里没有该元素。";
+                    return false;
+                }
+                try
+                {
+                    IntPtr pSelMgr;
+                    if (!TryCallObjSafe(pScene, SlotSceneSelectionMgr,
+                            "get_SelectionMgr(select)", out pSelMgr))
+                    {
+                        error = "取不到 IZSelectionMgr。";
+                        return false;
+                    }
+                    try
+                    {
+                        IntPtr fDel = Slot(pSelMgr, SlotSelMgrRemoveAllFromSelection);
+                        if (!LooksCallable(fDel)) { error = "槽 22 不可调用。"; return false; }
+                        FnNoArg del = (FnNoArg)Marshal.GetDelegateForFunctionPointer(fDel, typeof(FnNoArg));
+                        int hr1 = del(pSelMgr);
+                        Diagnostics.LogPoll(string.Format(
+                            "SelectLinkedElement: RemoveAllFromSelection(槽22) hr=0x{0:X}", hr1));
+
+                        IntPtr fAdd = Slot(pSelMgr, SlotSelMgrAddElementToSelection);
+                        if (!LooksCallable(fAdd)) { error = "槽 20 不可调用。"; return false; }
+                        FnAddElementToSelection add =
+                            (FnAddElementToSelection)Marshal.GetDelegateForFunctionPointer(
+                                fAdd, typeof(FnAddElementToSelection));
+                        int hr2 = add(pSelMgr, pElem, (short)-1);   // vbIgnoreFilter = true
+                        Diagnostics.LogPoll(string.Format(
+                            "SelectLinkedElement: AddElementToSelection(槽20) hr=0x{0:X}", hr2));
+                        if (hr2 != 0) error = "hr=0x" + hr2.ToString("X");
+                        return hr2 == 0;
+                    }
+                    finally { Marshal.Release(pSelMgr); }
+                }
+                finally { Marshal.Release(pElem); }
+            }
+            catch (Exception ex)
+            {
+                // SEHException / AccessViolation 都只当"这一步没做成"，不打断已经成功的替换
+                error = "写选择异常：" + ex.Message;
+                Diagnostics.Log("SelectLinkedElement EX: " + ex.GetType().Name + " " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                if (pScene != IntPtr.Zero) Marshal.Release(pScene);
+                if (pDoc != IntPtr.Zero) Marshal.Release(pDoc);
+            }
+        }
+
+        /// <summary>设计树定位结果（不依赖活选择）。</summary>
+        internal sealed class LinkedElementHit
+        {
+            public int ElementType;
+            public string ElementKind = "";
+            public string ElementName = "";
+            public string LinkedFile = "";
+        }
+
+        /// <summary>
+        /// 轮询期遍历设计树的节点上限与深度上限。
+        /// 4000 曾把「上支架」这类装配整棵树在 747 个零部件处截断（实机 4002 节点），
+        /// 截断又与「真没找到」同值返回 ⇒ 判据假阴性。现在根层先扫一遍，DFS 只作兜底，
+        /// 所以上限放到 12000 让它有机会走完；真截断时由 LastWalkTruncated 单独报出来。
+        /// </summary>
+        private const int WalkNodeCap = 12000;
+        private const int WalkDepthCap = 32;
+        private static int _walkNodes;
+
+        // ---- 走查取证快照（只读，供 ④/⑥ 的进度行使用；不参与任何判定）----
+        // 为什么需要：11-03 那两轮 88 s / 15 s 的 ⑥ 空转，日志里只有「未命中（遍历 4002 节点）」被
+        // LogPoll 去重掉，既看不出走查被上限截断，也看不出命中与否 —— 整段是黑箱。
+        public static int LastWalkNodes;
+        public static int LastWalkParts;
+        public static int LastWalkQiFail;
+        public static string LastWalkTruncated = "无";
+        private static int _walkParts;
+        private static int _walkQiFail;
+        private static string _walkTruncated = "无";
+
+        /// <summary>
+        /// 在整棵设计树里找外链指向 <paramref name="icsPath"/> 的元素，**不读活选择、也不写活选择**。
+        /// 为什么必须有这条路：原生「替换零件/装配」执行期间 CAXA 会清空活选择，换完也不会把新元素
+        /// 选回来（实机 15:53 那轮：IZArray.Count=0 持续 65 秒，直到用户手工点了一下替换后的件，
+        /// 判据才读到新元素、探针才算「完成」）。
+        /// 为什么这里绝不再顺手 AddElementToSelection：实机 16:38:51 替换已经生效，收尾把设计树走出来的
+        /// 元素指针按回选择集时抛 SEHException(0x80004005)，整条流程被判失败 —— 替换刚结束时场景正在
+        /// 重建，那个指针随时可能作废。要选中请让用户在设计树里点一下。
+        /// 槽位：根层 IZSceneDoc::GetFirstChild(24)/GetNextChild(25) 是**无参**成对迭代器，
+        /// 游标状态挂在文档对象上，必须在同一个 pScene 指针上连打；不可用时退回 GetTopElement(58)。
+        /// 下钻 IZElement::GetChildrenZArray(21) → IZArray::Count(7)/Get(9)。
+        /// </summary>
+        public static LinkedElementHit FindByLinkedFile(CaxaSession session, string icsPath)
+        {
+            if (session == null || string.IsNullOrEmpty(icsPath)) return null;
+            string targetBase = Path.GetFileNameWithoutExtension(icsPath);
+
+            IntPtr pDoc, pScene;
+            OpenActiveScene(session, out pDoc, out pScene);
+            try
+            {
+                if (pDoc == IntPtr.Zero || pScene == IntPtr.Zero) return null;
+
+                _walkNodes = 0;
+                _walkParts = 0;
+                _walkQiFail = 0;
+                _walkTruncated = "无";
+                IntPtr pElem = FindLinkedElementPointer(pScene, targetBase);
+                LastWalkNodes = _walkNodes;
+                LastWalkParts = _walkParts;
+                LastWalkQiFail = _walkQiFail;
+                LastWalkTruncated = _walkTruncated;
+                Diagnostics.LogPoll("设计树定位 " + targetBase + "：" +
+                    (pElem == IntPtr.Zero ? "未命中" : "命中") + "（遍历 " + _walkNodes + " 节点，" +
+                    "零部件 " + _walkParts + "，QI失败 " + _walkQiFail +
+                    "，截断 " + _walkTruncated + "）");
+                if (pElem == IntPtr.Zero) return null;
+
+                LinkedElementHit hit = new LinkedElementHit();
+                try
+                {
+                    int t;
+                    if (TryReadIntProp(pElem, SlotElemGetType, "IZElement.get_Type(walk)", out t))
+                    {
+                        hit.ElementType = t;
+                        hit.ElementKind = MapElementKind(t);
+                    }
+                    hit.ElementName = TryReadBstrProp(pElem, SlotElemGetName, "IZElement.get_Name(walk)") ?? "";
+                    hit.LinkedFile = ReadLinkedFile(pElem, hit.ElementType) ?? "";
+                }
+                finally { Marshal.Release(pElem); }
+                return hit;
+            }
+            finally
+            {
+                if (pScene != IntPtr.Zero) Marshal.Release(pScene);
+                if (pDoc != IntPtr.Zero) Marshal.Release(pDoc);
+            }
+        }
+
+        /// <summary>
+        /// 取证：把场景**根层**子项（类型 / 名称 / 外链）整段写进日志。
+        /// 只为区分两件事：替换提交后根层到底有没有出现新元素（替换真没生效）
+        /// 还是新元素在但判据没读到（判据假阴性）。只读，不改选择、不改文档。
+        /// </summary>
+        public static void DumpTopLevelScene(CaxaSession session, string tag)
+        {
+            IntPtr pDoc, pScene;
+            OpenActiveScene(session, out pDoc, out pScene);
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            try
+            {
+                if (pDoc == IntPtr.Zero || pScene == IntPtr.Zero)
+                {
+                    sb.AppendLine("  场景指针不可用");
+                }
+                else
+                {
+                    IntPtr pChild;
+                    int i = 0;
+                    if (TryCallObjSafe(pScene, SlotSceneGetFirstChild, "IZSceneDoc.GetFirstChild(顶层取证)", out pChild))
+                    {
+                        do
+                        {
+                            IntPtr pElem;
+                            int qi = TryQI(pChild, IID_IZElement, out pElem);
+                            Marshal.Release(pChild);
+                            if (qi == 0 && pElem != IntPtr.Zero)
+                            {
+                                try
+                                {
+                                    int t;
+                                    TryReadIntProp(pElem, SlotElemGetType, "IZElement.get_Type(顶层取证)", out t);
+                                    string nm = TryReadBstrProp(pElem, SlotElemGetName, "IZElement.get_Name(顶层取证)") ?? "";
+                                    string lk = "";
+                                    if (IsPartKind(t))
+                                        lk = ReadLinkedFile(pElem, t) ?? "";
+                                    sb.AppendLine(string.Format("  [{0}] type={1} name={2} link={3}", i, t, nm, lk));
+                                }
+                                finally { Marshal.Release(pElem); }
+                            }
+                            else sb.AppendLine("  [" + i + "] QI(IZElement) 失败 hr=0x" + qi.ToString("X"));
+                            i++;
+                        } while (TryCallObjSafe(pScene, SlotSceneGetNextChild, "IZSceneDoc.GetNextChild(顶层取证)", out pChild));
+                        sb.AppendLine("  根层子项数=" + i);
+                    }
+                    else sb.AppendLine("  根层迭代器不可用");
+                }
+            }
+            finally
+            {
+                if (pScene != IntPtr.Zero) Marshal.Release(pScene);
+                if (pDoc != IntPtr.Zero) Marshal.Release(pDoc);
+            }
+            Diagnostics.Dump("场景根层/" + tag, sb.ToString());
+        }
+
+        /// <summary>
+        /// 只查**根层**子项自身的外链，不下钻（命中时所有权移交调用方）。
+        /// 为什么必须有这一遍：11-03 09:09 实机——场景根层只有 2 个子项
+        /// `[0] SC08020103.00 P80油槽`（747 个零部件）与 `[1] SC08020102.03 上支架`（替换目标），
+        /// 而深度优先会先把 [0] 整棵树走完、撞上 4000 节点上限就返回 Zero，
+        /// 结果 [1] 永远轮不到：外链在 09:09:59 就已经换成 `上支架678.ics`（根层取证已证实），
+        /// 判据却一路报「未命中（截断 节点>4000）」，⑥ 空转满 120 秒。
+        /// 装配最外层的外链件本来就挂在这一层，先扫一层就能把这类判定压到个位数 COM 调用。
+        /// </summary>
+        private static IntPtr ScanRootLinks(IntPtr pScene, string targetBase)
+        {
+            IntPtr pChild;
+            if (!TryCallObjSafe(pScene, SlotSceneGetFirstChild,
+                    "IZSceneDoc.GetFirstChild(根层)", out pChild)) return IntPtr.Zero;
+            do
+            {
+                IntPtr pElem;
+                int qi = TryQI(pChild, IID_IZElement, out pElem);
+                Marshal.Release(pChild);
+                if (qi != 0 || pElem == IntPtr.Zero) continue;
+
+                bool match = false;
+                try
+                {
+                    int t;
+                    TryReadIntProp(pElem, SlotElemGetType, "IZElement.get_Type(根层)", out t);
+                    if (IsPartKind(t))
+                    {
+                        string link = ReadLinkedFile(pElem, t);
+                        match = link != null && string.Equals(
+                            Path.GetFileNameWithoutExtension(link),
+                            targetBase, StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+                finally { if (!match) Marshal.Release(pElem); }
+                if (match) return pElem;
+            } while (TryCallObjSafe(pScene, SlotSceneGetNextChild,
+                "IZSceneDoc.GetNextChild(根层)", out pChild));
+            return IntPtr.Zero;
+        }
+
+        /// <summary>在已取到的场景指针上遍历设计树，交出命中元素的 IZElement 指针（调用方 Release）。</summary>
+        private static IntPtr FindLinkedElementPointer(IntPtr pScene, string targetBase)
+        {
+            // 第一遍：根层（个位数调用，命中就是毫秒级）
+            IntPtr pHit = ScanRootLinks(pScene, targetBase);
+            if (pHit != IntPtr.Zero) return pHit;
+
+            IntPtr pChild;
+            bool iterated = false;
+            if (TryCallObjSafe(pScene, SlotSceneGetFirstChild, "IZSceneDoc.GetFirstChild", out pChild))
+            {
+                iterated = true;
+                do
+                {
+                    IntPtr pElem = SearchForLink(pChild, targetBase, 0);
+                    if (pElem != IntPtr.Zero) return pElem;
+                } while (TryCallObjSafe(pScene, SlotSceneGetNextChild, "IZSceneDoc.GetNextChild", out pChild));
+            }
+            if (!iterated)
+            {
+                IntPtr top;
+                if (TryCallObjSafe(pScene, SlotSceneGetTopElement, "IZSceneDoc.GetTopElement", out top))
+                {
+                    Diagnostics.Trace("设计树定位：根层迭代器不可用，改走 GetTopElement 兜底");
+                    return SearchForLink(top, targetBase, 0);
+                }
+            }
+            return IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// 深度优先：命中返回 IZElement 指针（所有权移交调用方），未命中返回 Zero（入参已释放）。
+        /// </summary>
+        private static IntPtr SearchForLink(IntPtr pRaw, string targetBase, int depth)
+        {
+            if (pRaw == IntPtr.Zero) return IntPtr.Zero;
+            if (depth > WalkDepthCap || ++_walkNodes > WalkNodeCap)
+            {
+                // 取证：把「被上限截断」单独记下来。以前它和「真的没找到」返回同一个 Zero，
+                // 汇总行只写「未命中」，88 秒空转时完全看不出走查根本没走完。
+                if (_walkTruncated == "无")
+                    _walkTruncated = depth > WalkDepthCap ? "深度>" + WalkDepthCap : "节点>" + WalkNodeCap;
+                Marshal.Release(pRaw);
+                return IntPtr.Zero;
+            }
+
+            IntPtr pElem;
+            int qi = TryQI(pRaw, IID_IZElement, out pElem);
+            Marshal.Release(pRaw);
+            if (qi != 0 || pElem == IntPtr.Zero)
+            {
+                _walkQiFail++;
+                return IntPtr.Zero;
+            }
+
+            int etype;
+            TryReadIntProp(pElem, SlotElemGetType, "IZElement.get_Type(walk)", out etype);
+            if (IsPartKind(etype))
+            {
+                _walkParts++;
+                string link = ReadLinkedFile(pElem, etype);
+                if (link != null && string.Equals(Path.GetFileNameWithoutExtension(link),
+                        targetBase, StringComparison.OrdinalIgnoreCase))
+                    return pElem;
+            }
+
+            // 只在「场景根(0) + 零部件类」里继续下钻：特征/面/边这些子树不可能挂外链件，
+            // 全走一遍会让 500ms 一次的轮询变成整棵特征树的重复扫描。
+            IntPtr pArr;
+            if ((etype == 0 || IsPartKind(etype)) &&
+                TryCallObjSafe(pElem, SlotElemGetChildrenZArray,
+                    "IZElement.GetChildrenZArray(walk)", out pArr))
+            {
+                try
+                {
+                    int count = ZArrayCount(pArr);
+                    for (int i = 0; i < count && _walkNodes <= WalkNodeCap; i++)
+                    {
+                        IntPtr pKid;
+                        if (!ZArrayGet(pArr, i, out pKid)) continue;
+                        IntPtr hit = SearchForLink(pKid, targetBase, depth + 1);
+                        if (hit != IntPtr.Zero) return hit;
+                    }
+                }
+                finally { Marshal.Release(pArr); }
+            }
+            Marshal.Release(pElem);
+            return IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// 提交重建单个零部件：零件族 IZPart::Update(槽 7)，装配 IZAssembly::Update(槽 7)。
+        ///
+        /// 为什么是 Update 而不是 Regenerate(槽 18)：规则第 9 节 / 第 32 节 B —— set_* 之后必须
+        /// Update 才把改动落到文档（实机 11-02 13:51：焊接底板 set_Name 回 hr=0 但回读仍是旧名，
+        /// 随后 IZDoc::Save 直接 0x80004005；同表兄弟 13:35 折弯板那轮提交成功、保存 hr=0）。
+        /// 另据否决 62：单条写入后 Regenerate 会把激活对象切到展开态零件，Update 才是提交动作。
+        ///
+        /// 钣金（type=20）Update 后会被切到「展开」配置（坑 111），所以收尾必须退回折叠态。
+        /// </summary>
+        private static string UpdateComponent(IntPtr pElem, int elemType, IntPtr pScene, string tag)
+        {
+            bool isAsm = elemType == 2;
+            IntPtr pComp;
+            int hrQi = TryQI(pElem, isAsm ? IID_IZAssembly : IID_IZPart, out pComp);
+            if (hrQi != 0 || pComp == IntPtr.Zero)
+            {
+                // 类型与实际接口不一定对得上（装配里混挂的零件、集合体件），换另一个再试一次
+                isAsm = !isAsm;
+                hrQi = TryQI(pElem, isAsm ? IID_IZAssembly : IID_IZPart, out pComp);
+                if (hrQi != 0 || pComp == IntPtr.Zero)
+                    throw new InvalidOperationException(
+                        string.Format("选中的元素既不是零件也不是装配体（QI 失败 hr=0x{0:X}）。", hrQi));
+            }
+
+            try
+            {
+                string iface = isAsm ? "IZAssembly.Update" : "IZPart.Update";
+                int slot = isAsm ? SlotAsmUpdate : SlotPartUpdate;
+                IntPtr fn = Slot(pComp, slot);
+                if (!LooksCallable(fn))
+                    throw new InvalidOperationException(
+                        string.Format("{0} 函数指针无效（slot {1}）。", iface, slot));
+                FnNoArg f = (FnNoArg)Marshal.GetDelegateForFunctionPointer(fn, typeof(FnNoArg));
+                int hr;
+                try
+                {
+                    hr = f(pComp);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(iface + " 调用异常：" + ex.Message);
+                }
+                Diagnostics.Trace(string.Format("{0}({1}) hr=0x{2:X}", iface, tag, hr));
+                if (hr != 0)
+                    throw new InvalidOperationException(
+                        string.Format("{0} 失败 hr=0x{1:X}", iface, hr));
+
+                // 调用方（UpdateSelectedComponent / 改名补提交）已经在前面拼了元素类型，
+                // 这里再说一遍「零件」会印成「钣金零件「X」零件已 Update 提交」（实机 14:54:15 日志）。
+                string report = "已 Update 提交";
+                if (elemType == 20)
+                    report += "；钣金折叠态恢复：" + RestoreFoldedSheetMetal(pElem, pScene);
+                return report;
+            }
+            finally
+            {
+                Marshal.Release(pComp);
+            }
+        }
+
+        /// <summary>
+        /// 把钣金件退回折叠配置：优先 IZSheetMetalPart::Refold(槽 8)（更贴近 UI 流程），
+        /// 不可用或失败再激活场景默认配置。
+        /// </summary>
+        private static string RestoreFoldedSheetMetal(IntPtr pElem, IntPtr pScene)
+        {
+            // 「Refold 不可用」要能分清是哪一步不可用：实机 14:54:15 只给了一句结论，
+            // 到底是 QI 失败、槽位取不到、还是调用回了错，无从判断（三种走法完全不同）。
+            string why;
+            IntPtr pSm;
+            int qiHr = TryQI(pElem, IID_IZSheetMetalPart, out pSm);
+            if (qiHr == 0 && pSm != IntPtr.Zero)
+            {
+                try
+                {
+                    IntPtr fn = Slot(pSm, SlotSmRefold);
+                    if (LooksCallable(fn))
+                    {
+                        FnNoArg f = (FnNoArg)Marshal.GetDelegateForFunctionPointer(fn, typeof(FnNoArg));
+                        int hr = f(pSm);
+                        Diagnostics.Trace(string.Format("IZSheetMetalPart.Refold hr=0x{0:X}", hr));
+                        if (hr == 0) return "Refold 成功";
+                        why = "Refold 回 hr=0x" + hr.ToString("X");
+                    }
+                    else why = "槽 " + SlotSmRefold + " 函数指针无效";
+                }
+                finally { Marshal.Release(pSm); }
+            }
+            else why = "QI(IZSheetMetalPart) 失败 hr=0x" + qiHr.ToString("X");
+            Diagnostics.Log("钣金折叠态恢复：" + why + "，改用激活默认配置");
+            return "Refold 未成（" + why + "），回退激活默认配置（" + ActivateDefaultConfiguration(pScene) + "）";
+        }
+
+        /// <summary>激活场景默认配置（IZConfigurationMgr::get_DefaultConfiguration → IZConfiguration::Activate）。</summary>
+        private static string ActivateDefaultConfiguration(IntPtr pScene)
+        {
+            IntPtr pMgrRaw;
+            if (!TryCallObjSafe(pScene, SlotSceneGetConfigurationMgr,
+                    "IZSceneDoc.get_ConfigurationMgr(restore)", out pMgrRaw))
+                return "取不到 ConfigurationMgr";
+
+            IntPtr pMgr = IntPtr.Zero, pDef = IntPtr.Zero, pCfg = IntPtr.Zero;
+            try
+            {
+                if (TryQI(pMgrRaw, IID_IZConfigurationMgr, out pMgr) != 0 || pMgr == IntPtr.Zero)
+                    return "QI(IZConfigurationMgr) 失败";
+                if (!TryCallObjSafe(pMgr, SlotCfgMgrDefault,
+                        "cfgMgr.get_DefaultConfiguration(restore)", out pDef))
+                    return "默认配置对象为空";
+                if (TryQI(pDef, IID_IZConfiguration, out pCfg) != 0 || pCfg == IntPtr.Zero)
+                    return "QI(IZConfiguration) 失败";
+
+                string defName = TryReadBstrProp(pCfg, SlotCfgGetName, "IZConfiguration.get_Name(restore)");
+                int hr = TryInvokeShortArg(pCfg, SlotCfgActivate, unchecked((short)-1),
+                    "IZConfiguration.Activate(默认)");
+                return hr == 0
+                    ? "已激活默认配置「" + defName + "」"
+                    : "激活默认配置「" + defName + "」失败 hr=0x" + hr.ToString("X");
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.Log("ActivateDefaultConfiguration EX: " + ex.Message);
+                return "异常：" + ex.Message;
+            }
+            finally
+            {
+                if (pCfg != IntPtr.Zero) Marshal.Release(pCfg);
+                if (pDef != IntPtr.Zero) Marshal.Release(pDef);
+                if (pMgr != IntPtr.Zero) Marshal.Release(pMgr);
+                Marshal.Release(pMgrRaw);
+            }
+        }
+
+        /// <summary>
+        /// 「零部件重新生成」：对当前选中的零部件调 IZPart/IZAssembly::Update(槽 7) 提交重建，
+        /// 钣金件退回折叠态，最后刷新设计树与图形区。返回给界面显示的中文说明。
+        /// </summary>
+        public static string UpdateSelectedComponent(CaxaSession session)
+        {
+            if (session == null)
+                throw new InvalidOperationException("尚未连接 CAXA 3D。");
+
+            IntPtr pDoc, pScene;
+            OpenActiveScene(session, out pDoc, out pScene);
+            if (pDoc == IntPtr.Zero)
+                throw new InvalidOperationException("CAXA 3D 当前没有活动设计文档。");
+
+            try
+            {
+                IntPtr pElem = GetSelectedElement(pScene, "update");
+                if (pElem == IntPtr.Zero)
+                    throw new InvalidOperationException("请先在 CAXA 里选中一个零件或装配体（设计树或图形区点一下）。");
+                try
+                {
+                    int elemType;
+                    TryReadIntProp(pElem, SlotElemGetType, "IZElement.get_Type(update)", out elemType);
+                    string report = UpdateComponent(pElem, elemType, pScene, "update");
+                    RefreshSceneUi(pScene);
+                    string name = TryReadBstrProp(pElem, SlotElemGetName, "IZElement.get_Name(update)");
+                    return MapElementKind(elemType) + "「" + name + "」" + report;
+                }
+                finally { Marshal.Release(pElem); }
+            }
+            finally
+            {
+                Marshal.Release(pScene);
+                Marshal.Release(pDoc);
             }
         }
 
@@ -1244,10 +2059,40 @@ namespace caxa3dcodenameextraction
                     FnSetBstrProp f = (FnSetBstrProp)Marshal.GetDelegateForFunctionPointer(
                         fn, typeof(FnSetBstrProp));
                     int hr = f(pElem, newName);
-                    Diagnostics.Log(string.Format("RenameSelectedElement: \"{0}\" hr=0x{1:X}", newName, hr));
+                    Diagnostics.Trace(string.Format("RenameSelectedElement: \"{0}\" hr=0x{1:X}", newName, hr));
                     if (hr != 0)
                         throw new InvalidOperationException(
                             string.Format("修改零件名失败 hr=0x{0:X}", hr));
+
+                    // 写不等于提交（规则第 32 节 B）。实机 11-02 13:51 焊接底板：set_Name 回 hr=0，
+                    // 但 13:51:26.027 探针读回还是旧名「SC08020102.11-02 焊接底板」，而链接已经换成
+                    // …4444.ics —— 名旧链新的文档 IZDoc::Save 直接 0x80004005。
+                    // 所以回读不一致时补一次 IZPart::Update 提交（钣金顺带回折叠态），再看一眼。
+                    string readback = TryReadBstrProp(pElem, SlotElemGetName, "IZElement.get_Name(改名回读)");
+                    if (readback != null && readback != newName)
+                    {
+                        Diagnostics.Log(string.Format(
+                            "改名回读=「{0}」≠目标「{1}」，补 IZPart.Update 提交", readback, newName));
+                        int elemType;
+                        TryReadIntProp(pElem, SlotElemGetType, "IZElement.get_Type(改名提交)", out elemType);
+                        string committed;
+                        try
+                        {
+                            committed = UpdateComponent(pElem, elemType, pScene, "改名提交");
+                        }
+                        catch (Exception uex)
+                        {
+                            Diagnostics.Log("改名后补提交异常: " + uex.Message);
+                            committed = "补提交失败：" + uex.Message;
+                        }
+                        RefreshSceneUi(pScene);
+                        readback = TryReadBstrProp(pElem, SlotElemGetName, "IZElement.get_Name(改名回读2)");
+                        if (readback != null && readback != newName)
+                            throw new InvalidOperationException(string.Format(
+                                "改名没有落到元素上（目标「{0}」，回读「{1}」；{2}）。已中止、未保存，" +
+                                "可在 CAXA 里选中该件点「零部件重新生成」后再试。",
+                                newName, readback, committed));
+                    }
                 }
                 finally
                 {
@@ -1261,14 +2106,49 @@ namespace caxa3dcodenameextraction
             }
         }
 
-        /// <summary>保存活动文档（IZDoc::Save）。</summary>
-        public static void SaveActiveDoc(CaxaSession session)
+        /// <summary>
+        /// 保存活动文档（IZDoc::Save）。
+        ///
+        /// E_FAIL（0x80004005）在替换/改名之后常见，且多半是宿主还在收尾——换外链 + 重附约束实测
+        /// 最长约 20 秒（坑 128），这时文档处于半提交状态，直接 Save 就吃 E_FAIL。所以带**有界重试**：
+        /// 只在 E_FAIL 时重试，最多 3 次，间隔由调用方给的 waitBeforeRetry 决定（主线程必须泵消息，
+        /// 绝不能干等）。其它错误码是硬失败，不重试。
+        /// </summary>
+        public static void SaveActiveDoc(CaxaSession session, Action<int> waitBeforeRetry = null)
         {
+            int lastHr = HR_FAIL;
+            for (int attempt = 1; attempt <= 3; attempt++)
+            {
+                bool noDoc;
+                lastHr = TrySaveActiveDocOnce(session, out noDoc);
+                if (noDoc)
+                    throw new InvalidOperationException("CAXA 3D 当前没有活动文档。");
+                if (lastHr == 0)
+                {
+                    if (attempt > 1)
+                        Diagnostics.Log("SaveActiveDoc 第 " + attempt + " 次重试成功");
+                    return;
+                }
+                if (lastHr != HR_FAIL || waitBeforeRetry == null || attempt == 3) break;
+                Diagnostics.Log(string.Format(
+                    "SaveActiveDoc hr=0x{0:X}（第 {1} 次），等宿主把替换/重建收尾跑完再重试", lastHr, attempt));
+                waitBeforeRetry(1200);
+            }
+            throw new InvalidOperationException(string.Format("保存文档失败 hr=0x{0:X}", lastHr));
+        }
+
+        /// <summary>打一次 IZDoc::Save，返回 HRESULT；noDoc=true 表示当前没有活动文档。</summary>
+        private static int TrySaveActiveDocOnce(CaxaSession session, out bool noDoc)
+        {
+            noDoc = false;
             IntPtr pDoc, pScene;
             OpenActiveScene(session, out pDoc, out pScene);
             if (pScene != IntPtr.Zero) Marshal.Release(pScene);
             if (pDoc == IntPtr.Zero)
-                throw new InvalidOperationException("CAXA 3D 当前没有活动文档。");
+            {
+                noDoc = true;
+                return HR_FAIL;
+            }
             try
             {
                 IntPtr pZDoc = QIRequired(pDoc, IID_IZDoc, "IZDoc");
@@ -1279,9 +2159,8 @@ namespace caxa3dcodenameextraction
                         throw new InvalidOperationException("IZDoc::Save 函数指针无效。");
                     FnNoArg f = (FnNoArg)Marshal.GetDelegateForFunctionPointer(fn, typeof(FnNoArg));
                     int hr = f(pZDoc);
-                    Diagnostics.Log(string.Format("SaveActiveDoc hr=0x{0:X}", hr));
-                    if (hr != 0)
-                        throw new InvalidOperationException(string.Format("保存文档失败 hr=0x{0:X}", hr));
+                    Diagnostics.Trace(string.Format("SaveActiveDoc hr=0x{0:X}", hr));
+                    return hr;
                 }
                 finally
                 {

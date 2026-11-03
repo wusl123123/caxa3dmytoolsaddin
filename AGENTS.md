@@ -27,7 +27,7 @@ CAXA 3D **集合体 Add-in**：CAXA 里只登记一个 `caxa3dmytoolsaddin`，�
 ## 2. 构建 / 部署 / 打包（只有这四个入口）
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1     # 契约 -> 独立工具 EXE -> 11 个子插件 -> 主程序 -> 汇总 src\plugins
+powershell -ExecutionPolicy Bypass -File build.ps1     # 契约 -> 独立工具 EXE -> 12 个子插件 -> 主程序 -> 汇总 src\plugins
 安装.bat                                                # 部署（自动提权，扫描本机所有 CAXA 3D 版本）
 卸载.bat                                                # 手术式移除四个登记点，不还原 .bak
 打包.bat                                                # dist\caxa3dmytoolsaddin-<版本>.zip（无源码）
@@ -44,7 +44,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1     # 契约 -> 独立工具 
 powershell -ExecutionPolicy Bypass -File C:\code\ICAPI\_probe-tools\caxa-slot-check.ps1
 ```
 
-退出码非 0 不算完成（`MISMATCH`/`NOTFOUND` 为致命；`UNMAPPED` 建议补 `// IZXxx::Method` 注释）。当前已知基线：默认扫描根 107 条 / 3 处 MISMATCH 全在 `plugins\caxa3dcodenameextraction\SheetMetalOps.cs` 的死常量上，不要「顺手」把它们复制到新代码。
+退出码非 0 不算完成（`MISMATCH`/`NOTFOUND` 为致命；`UNMAPPED` 建议补 `// IZXxx::Method` 注释）。当前已知基线（2026-11-03）：全库 **186** 条 = OK 139 / MISMATCH **0** / NOTFOUND 0 / UNMAPPED 47 / CONFLICT 0。原基线里 3 处 MISMATCH 在 `plugins\caxa3dcodenameextraction\SheetMetalOps.cs` 的死常量上，随该文件同步 `caxa3ddiffrename` 版本（删掉已死的 `ReflectSlot` 反射通道）清零，不要「顺手」把死常量复制到新代码。
 
 ---
 
@@ -69,7 +69,7 @@ C:\Program Files\CAXA\CAXA 3D\<年份>\bin\
 
 现有插件 Id（11 个）：`Caxa3dcudeaddin`、`caxa3dAttributeManageraddin`、`caxa3dcodenameextraction`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dminitool`、`caxa3dsheetmaster`、`caxa3dexbtest`、`caxa3dapigetaddin`、`caxa3didcskill`、`caxa3dCXDFTViewUpdate`。
 
-主工具箱窗口按 `IPlugin.Category` 分三列表格：`1. 常用插件`（`BuiltIn`）/ `2. 独立插件`（`Independent`）/ `3. 测试插件`（`Test`）。当前常用列（6）：`caxa3dcodenameextraction`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dminitool`、`caxa3dsheetmaster`、`caxa3dCXDFTViewUpdate`；测试列（4）：`Caxa3dcudeaddin`、`caxa3dAttributeManageraddin`、`caxa3dexbtest`、`caxa3dapigetaddin`；独立列（1）：`caxa3didcskill`（后台进程清理）。
+主工具箱窗口按 `IPlugin.Category` 分四列表格：`1. 常用插件`（`BuiltIn`）/ `2. 独立插件`（`Independent`）/ `3. 系统工具`（`SystemTool`）/ `4. 测试插件`（`Test`）。当前常用列（6）：`caxa3dcodenameextraction`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dminitool`、`caxa3dsheetmaster`、`caxa3dCXDFTViewUpdate`；测试列（4）：`Caxa3dcudeaddin`、`caxa3dAttributeManageraddin`、`caxa3dexbtest`、`caxa3dapigetaddin`；独立列（1）：`caxa3didcskill`（后台进程清理）；系统工具列（1）：`caxa3dsetbackup`（设置备份）。
 
 独立工具接入方式（唯一范式）：`plugins\caxa3didcskill\` 是**启动器 DLL**（`Category=Independent`，不引用 interop、不建窗口、不实现任何业务逻辑，`Activate()` 只做「同目录 EXE 存在→单实例前台化/启动」），真正干活的是 `tools\caxa3didcskill\caxa3didcskill.exe`。两者随包部署到同一目录 `<CAXA bin>\caxa3dmytoolsaddin\plugins\caxa3didcskill\`。禁止把进程清理逻辑写回进程内插件（规则 16.6）。
 
@@ -123,6 +123,7 @@ C:\Program Files\CAXA\CAXA 3D\<年份>\bin\
 - 主程序：`%TEMP%\caxa3dmytoolsaddin_trace.log`（每次启动清空）。
 - 子插件：`%TEMP%\<插件Id>_trace.log`（9 个业务插件各自一份，命名即插件 Id；`caxa3didcskill` 启动器不建自己的日志文件，只写 Host 主日志）。
 - 独立工具：`%TEMP%\caxa3didcskill_trace.log`（`tools\caxa3didcskill`）。
+- 探针日志（`_crx.log` / `_crx.marker` / `_result.log` 及标记文件）**随主 log 一起，在脚本（部署/刷新/启动）后重置（清空）**，不与上一会话残留混读。
 - 关键判据必须写**文件日志**；`AddLog` 类只进 UI 的步骤日志不算证据。
 - 专项证据统一归档 `C:\code\ICAPI\_probe-tools\out\<项目名>\`（`probe_*.txt` / `trace_*.log` / `user_*.txt`），**不要散在桌面或 `%TEMP%`**；归档最小集 = 探针报告 + 全量 trace + 被质疑那批 DLL 指纹（大小/mtime/SHA256）。
 - 用户报「数据抓错了」时排查顺序：①trace 里有 `set_*` 痕迹 → ②CAXA 里实际加载的 DLL 指纹 → ③最后才 diff 源码（规则坑 114）。
@@ -134,7 +135,7 @@ C:\Program Files\CAXA\CAXA 3D\<年份>\bin\
 1. `mt.exe -inputresource:...dll;#2 -out:probe.xml` 抽内嵌清单：`clrClass` 恰好 1 条且为自身 Addin，`clrSurrogate`/interop 残留 = 0。
 2. `sn -vf` 通过；`publicKeyToken = 56647e1eee90f6d4`。
 3. 全部 `.ps1` 单 BOM，`Parser::ParseFile` 0 错误。
-4. `caxa-slot-check.ps1` 无新增致命项。当前基线：默认扫描根 107 条 = OK 104 + MISMATCH 3（`plugins\caxa3dcodenameextraction\SheetMetalOps.cs` 第 66/68/69 行三个无调用点的死常量，值 9/31/45 应为 8/28/42）。**本次改动若让致命项 > 3，即未通过**；顺手改成正确值或删除也算合格。
+4. `caxa-slot-check.ps1` 无新增致命项。当前基线（2026-11-03）：**186 条 = OK 139 / MISMATCH 0 / NOTFOUND 0 / UNMAPPED 47 / CONFLICT 0（PASS）**。历史上那 3 条 MISMATCH（`plugins\caxa3dcodenameextraction\SheetMetalOps.cs` 第 66/68/69 行的死常量，值 9/31/45 应为 8/28/42）已随该文件同步 `caxa3ddiffrename` 版本（删掉 `ReflectSlot` 反射通道与死常量）清零。**本次改动若让致命项 > 0，即未通过**。
 5. 编译 0 error 0 warning（`dotnet build -c Release -p:Platform=x64`）。
 
 **未在真机跑过就不能宣称"可用"**；只能说明「已编译通过、待实测」，并在项目总结第 7 节标注待实测项。
@@ -163,4 +164,4 @@ C:\Program Files\CAXA\CAXA 3D\<年份>\bin\
 - 依赖「命令名」执行内部命令（`Commands.xml` 有登记 ≠ CRX 命令表里有）。
 - 已否决路线见规则第 23 节（64 条）与第 32 节 E，**永久不再尝试**。
 - 安装/卸载里把「安装根」和「版本目录」放进同一张去重表。注册表 `InstallDir` 指向的是版本目录本身（`<根>\<年份>\`），共用 `$seen` 会让该版本先被记成"已处理的根"，随后扫真根时被跳过 → **整版漏装**（本机曾因此只装 2027、丢掉真实存在的 2024）。必须 `$seenRoot` / `$seenVer` 分离。
-- 装/卸脚本验证只跑单版本或只看"程序没报错"。本机同时装了 2024(26.0) 与 2027(29.0)，**必须两版本都验证**（发现列表、落位、注册表、卸载残留），且模拟根烟测要用 3098/3099 这类假年份隔离真实 `26.0`/`29.0` 键。
+- 把「有 `<年份>\bin`」当成「CAXA 3D 已安装」。第三方机器上 `C:\Program Files\CAXA\CAXA ICS VIEWER\2027\bin` 与 CAXA 3D 同构但没有 `Config\IronCad.Addin.config`，只测 `bin` 会装到 Viewer 目录，随后校验里的 `Select-String` 对不存在路径抛 PathNotFound 直接中断。判据必须是「4 位年份 + bin + Config\IronCad.Addin.config」（`Test-CaxaVersionDir`）；校验段只遍历真正装成功的版本，`Select-String` 前先 `Test-Path`；空版本列表用 `[object[]]@()` 返回，别用 `@($x | Sort-Object)`。- 装/卸脚本验证只跑单版本或只看"程序没报错"。本机同时装了 2024(26.0) 与 2027(29.0)，**必须两版本都验证**（发现列表、落位、注册表、卸载残留），且模拟根烟测要用 3098/3099 这类假年份隔离真实 `26.0`/`29.0` 键。
