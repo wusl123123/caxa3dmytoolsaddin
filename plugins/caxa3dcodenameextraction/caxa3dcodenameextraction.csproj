@@ -54,6 +54,8 @@
     <None Update="caxa3dcodenameextraction使用说明.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="caxa3dsheetsizewriteaddfix.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Dlg3DInfo.ctl-baseline.ini" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 图纸环境预热的载体图纸（冷启动 OpenFile2 会崩，预热只能靠这张 exb 把图纸环境焐热） -->
+    <None Update="caxa3d图纸环境预热.exb" CopyToOutputDirectory="PreserveNewest" />
     <None Update="ExbLinkPatch.exe" CopyToOutputDirectory="PreserveNewest" />
     <None Update="register-crx.ps1" CopyToOutputDirectory="PreserveNewest" />
     <None Update="unregister-crx.ps1" CopyToOutputDirectory="PreserveNewest" />

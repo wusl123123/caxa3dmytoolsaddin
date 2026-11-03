@@ -11,7 +11,7 @@ namespace caxa3dmytoolsaddin
     /// <summary>
     /// 我的工具箱主窗口：
     ///   - 顶部只有「窗口前置」开关（默认开启，点击可切换）；
-    ///   - 主体为三列表格：1.常用插件 / 2.独立插件 / 3.测试插件；
+    ///   - 主体为四列表格：1.常用插件 / 2.独立插件 / 3.系统工具 / 4.测试插件；
     ///   - 每个插件占一个单元格，单击单元格打开；单元格不折行、不缩小字体，
     ///     列最小宽度按最长文字实测，窗口最小尺寸随之放大，避免文字被遮挡。
     /// </summary>
@@ -46,7 +46,7 @@ namespace caxa3dmytoolsaddin
         private static readonly Font HeaderFont = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
         private static readonly Font EmptyFont = new Font("Microsoft YaHei UI", 9F, FontStyle.Italic);
 
-        /// <summary>单元格 → 插件。键 = row * 3 + column；占位单元格不入表。</summary>
+        /// <summary>单元格 → 插件。键 = row * Columns.Length + column；占位单元格不入表。</summary>
         private readonly Dictionary<int, IPlugin> _cellPlugins = new Dictionary<int, IPlugin>();
         private DataGridViewCell _hoverCell;
 
@@ -54,6 +54,7 @@ namespace caxa3dmytoolsaddin
         {
             PluginCategory.BuiltIn,
             PluginCategory.Independent,
+            PluginCategory.SystemTool,
             PluginCategory.Test
         };
 
@@ -61,7 +62,8 @@ namespace caxa3dmytoolsaddin
         {
             "1. 常用插件",
             "2. 独立插件",
-            "3. 测试插件"
+            "3. 系统工具",
+            "4. 测试插件"
         };
 
         /// <summary>主窗口标题严格为「中文名称-yyyyMMddHHmm」，版本 = 主程序 DLL 写入时间，编译即自动更新。</summary>
@@ -126,7 +128,7 @@ namespace caxa3dmytoolsaddin
             _panelTop.Controls.Add(_lblHint);
             _panelTop.Controls.Add(_btnTopMost);
 
-            // === 主体：三列表格 ===
+            // === 主体：四列表格 ===
             _panelBody = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -221,6 +223,7 @@ namespace caxa3dmytoolsaddin
             {
                 { PluginCategory.BuiltIn, new List<IPlugin>() },
                 { PluginCategory.Independent, new List<IPlugin>() },
+                { PluginCategory.SystemTool, new List<IPlugin>() },
                 { PluginCategory.Test, new List<IPlugin>() }
             };
 
@@ -288,9 +291,16 @@ namespace caxa3dmytoolsaddin
 
         private static PluginCategory NormalizeCategory(IPlugin plugin)
         {
-            return plugin.Category == PluginCategory.Independent || plugin.Category == PluginCategory.Test
-                ? plugin.Category
-                : PluginCategory.BuiltIn;
+            switch (plugin.Category)
+            {
+                case PluginCategory.Independent:
+                case PluginCategory.SystemTool:
+                case PluginCategory.Test:
+                    return plugin.Category;
+                default:
+                    // 未知分类归入常用列，避免插件从界面上消失
+                    return PluginCategory.BuiltIn;
+            }
         }
 
         private void Grid_CellClick(object sender, DataGridViewCellEventArgs e)

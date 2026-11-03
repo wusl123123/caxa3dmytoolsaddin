@@ -44,9 +44,10 @@ $plugins = @(
     # 操作 API 抓取器：除 DLL 外还要带图纸环境 CRX 桥接模块
     @{ Name = 'caxa3dapigetaddin';           Project = (Join-Path $root 'plugins\caxa3dapigetaddin\caxa3dapigetaddin.csproj');
        Extra = @('.crx') },
-    # 带图改名及图号分离：除 DLL 外还要带规则/说明/控件基线/CRX 注册脚本/CRX 桥本体
+    # 带图改名及图号分离：除 DLL 外还要带规则/说明/控件基线/CRX 注册脚本/CRX 桥本体，
+    # 以及图纸环境预热用的载体图纸 .exb（缺它冷启动预热直接失效，见插件总结「图纸环境预热」）
     @{ Name = 'caxa3dcodenameextraction';    Project = (Join-Path $root 'plugins\caxa3dcodenameextraction\caxa3dcodenameextraction.csproj');
-       Extra = @('.crx', '.txt', '.ini', '.exe', '.ps1') },
+       Extra = @('.crx', '.txt', '.ini', '.exe', '.ps1', '.exb') },
     # 材料工具：需带色卡.xml 与资料库种子 自定义材料.xml
     @{ Name = 'caxa3dsetMaterial';           Project = (Join-Path $root 'plugins\caxa3dsetMaterial\caxa3dsetMaterial.csproj');
        Extra = @('.xml') },
@@ -65,6 +66,8 @@ $plugins = @(
     # 图纸环境矩形测试：需带 CRX 桥接模块 .crx 与模块登记 .info
     @{ Name = 'caxa3dexbtest';               Project = (Join-Path $root 'plugins\caxa3dexbtest\caxa3dexbtest.csproj');
        Extra = @('.crx', '.info') },
+    # 设置备份（系统工具列）：原独立 Add-in 的内置插件内核，仅 DLL，无额外资源
+    @{ Name = 'caxa3dsetbackup';             Project = (Join-Path $root 'plugins\caxa3dsetbackup\caxa3dsetbackup.csproj') },
     # 后台进程清理（独立插件列）：DLL 只是启动器，真正干活的是随包部署的 caxa3didcskill.exe
     @{ Name = 'caxa3didcskill';              Project = (Join-Path $root 'plugins\caxa3didcskill\caxa3didcskill.csproj');
        Extra = @('.exe'); ExtraSrc = @($idcToolExe) }

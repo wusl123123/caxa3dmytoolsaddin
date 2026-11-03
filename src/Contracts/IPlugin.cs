@@ -14,7 +14,10 @@ namespace Caxa3dMyTools.Contracts
         Independent = 1,
 
         /// <summary>测试插件：验证性、诊断性工具。</summary>
-        Test = 2
+        Test = 2,
+
+        /// <summary>系统工具：环境配置备份/还原等系统级工具。</summary>
+        SystemTool = 3
     }
 
     /// <summary>
@@ -32,7 +35,7 @@ namespace Caxa3dMyTools.Contracts
         /// <summary>插件显示名（主工具窗口汇总区按钮标题）。</summary>
         string DisplayName { get; }
 
-        /// <summary>插件归类：常用（BuiltIn）、独立（Independent）或测试（Test）。</summary>
+        /// <summary>插件归类：常用（BuiltIn）、独立（Independent）、系统工具（SystemTool）或测试（Test）。</summary>
         PluginCategory Category { get; }
 
         /// <summary>

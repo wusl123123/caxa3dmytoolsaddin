@@ -63,10 +63,7 @@ namespace caxa3dcodenameextraction
         private const int SlotDocClose = 13;              // IZDoc::Close (DispId 7 + 6)
         private const int SlotDocGetModified = 16;         // IZDoc::get_Modified (DispId 10 + 6)
         private const int SlotDocClose2 = 23;              // IZDoc::Close2(VARIANT_BOOL) (DispId 17 + 6)
-        private const int SlotAppGetOpenDocs = 9;          // IZBaseApp::GetOpenDocs (DispId 2 + 7)
-        private const int SlotAppGetOpenDocsCount = 14;    // IZBaseApp::GetOpenDocsCount (DispId 7 + 7)
-        private const int SlotSceneGetLinksInfo = 31;       // IZSceneDoc::GetLinksInfo (DispId 24 + 7)
-        private const int SlotSceneDeleteAllTx = 45;        // IZSceneDoc::DeleteAllTransactions (DispId 38 + 7)
+        private const int SlotAppGetOpenDocsCount = 14;    // IZBaseApp::GetOpenDocsCount
         private const int SlotElemSetName = 10;           // IZElement::set_Name
         private const int SlotPartGetExtLinkedInfo = 17;  // IZPart::GetExternallyLinkedInfo
         private const int SlotPartRegenerate = 18;        // IZPart::Regenerate()
@@ -261,85 +258,6 @@ namespace caxa3dcodenameextraction
         {
             IntPtr vt = Marshal.ReadIntPtr(pIface);
             return Marshal.ReadIntPtr(vt, slot * IntPtr.Size);
-        }
-
-        /// <summary>
-        /// 通过 ITypeInfo.GetFuncDesc 在接口的类型库里查找指定方法/属性名对应的 vtable 槽位。
-        /// 原理（勘察清单 §4.4 已实证）：槽位 = FUNCDESC.memid（元数据索引）+ 7。
-        /// 返回 -1 表示未找到或反射失败。
-        /// </summary>
-        /// <param name="pIface">任意接口指针（已 QI 到目标接口的）</param>
-        /// <param name="methodName">方法/属性名（如 "Close2", "get_Modified", "GetOpenDocsCount"）</param>
-        /// <param name="iid">目标接口 IID（用于从类型库提取正确的 ITypeInfo）</param>
-        /// <returns>vtable 槽位，未找到返回 -1</returns>
-        private static int ReflectSlot(IntPtr pIface, string methodName, Guid iid)
-        {
-            try
-            {
-                if (pIface == IntPtr.Zero) return -1;
-                IntPtr pTypeInfoRaw = IntPtr.Zero;
-                ITypeInfo ti = null;
-                try
-                {
-                    // 从接口指针拿到 IDispatch → 调用 GetTypeInfo 拿到类型库内的索引
-                    IntPtr pUnk = pIface;
-                    IRawDispatch dispatch = (IRawDispatch)Marshal.GetObjectForIUnknown(pUnk);
-                    int hr = dispatch.GetTypeInfo(0, 0, out pTypeInfoRaw);
-                    if (hr != 0 || pTypeInfoRaw == IntPtr.Zero)
-                    {
-                        Diagnostics.Log("ReflectSlot(" + methodName + "): GetTypeInfo hr=0x" + hr.ToString("X8"));
-                        return -1;
-                    }
-                    ti = (ITypeInfo)Marshal.GetObjectForIUnknown(pTypeInfoRaw);
-                    // 确认 ITypeInfo 的 typeAttr.guid 是否匹配目标接口
-                    IntPtr pTA;
-                    ti.GetTypeAttr(out pTA);
-                    if (pTA == IntPtr.Zero) return -1;
-
-                    // 遍历所有 FUNCDESC 找名字匹配的
-                    int funcCount = Marshal.ReadInt16(pTA, 6); // typeAttr.cFuncs (偏移 6)
-                    for (int i = 0; i < funcCount; i++)
-                    {
-                        IntPtr pFuncDesc;
-                        ti.GetFuncDesc(i, out pFuncDesc);
-                        if (pFuncDesc == IntPtr.Zero) continue;
-                        try
-                        {
-                            // FUNCDESC 结构（x64 下的实际内存布局）：
-                            //   偏移 0: FUNCDESC.guid (GUID, 16 字节)
-                            //   偏移 16: FUNCDESC.memid (int, 4 字节)
-                            // 但实际上 FUNCDESC 开头有两个 WORD 填充，不同版本结构不同
-                            // 更稳妥：用 GetNames 直接按 memid 取名字
-                            int memid = Marshal.ReadInt32(pFuncDesc, 16);
-                            string[] names = new string[1];
-                            int pcNames;
-                            ti.GetNames(memid, names, 1, out pcNames);
-                            if (pcNames > 0 && names[0] != null
-                                && string.Equals(names[0], methodName, StringComparison.OrdinalIgnoreCase))
-                            {
-                                int slot = memid + 7;
-                                Diagnostics.Log("ReflectSlot: " + methodName + " → memid=" + memid + " → slot=" + slot);
-                                ti.ReleaseTypeAttr(pTA);
-                                return slot;
-                            }
-                        }
-                        finally { ti.ReleaseFuncDesc(pFuncDesc); }
-                    }
-                    ti.ReleaseTypeAttr(pTA);
-                    Diagnostics.Log("ReflectSlot: " + methodName + " 未找到（共 " + funcCount + " 个函数）");
-                    return -1;
-                }
-                finally
-                {
-                    if (ti != null) Marshal.ReleaseComObject(ti);
-                    if (pTypeInfoRaw != IntPtr.Zero) Marshal.Release(pTypeInfoRaw);
-                }
-            }
-            catch (Exception ex)
-            {
-                Diagnostics.Log("ReflectSlot(" + methodName + ") EX: " + ex.Message);
-                return -1;
-            }
         }
 
         private static int TryQI(IntPtr pUnk, Guid iid, out IntPtr ppv)
@@ -1895,9 +1813,9 @@ namespace caxa3dcodenameextraction
                 && opt.WaitCondition("保存并关闭工程图", 30000, closedCond);
             if (!closed)
             {
-                CrxBridge.PostCommand("CMD:CLOSE");
-                closed = opt.WaitCondition != null
-                    && opt.WaitCondition("关闭工程图兜底", 15000, closedCond);
+                // 不补投 CMD:CLOSE：CX_DFT_ViewClose 打在「当前激活视图」上，
+                // 图纸没开着时会打到 3D 设计环境（11:29 事故同源）。
+                log("  图纸「" + exbName + "」保存/关闭未确认；按铁律不再向当前视图补投关闭命令");
             }
             r.DrawingSavedClosed = closed;
             r.DrawingSaveInfo = closed
@@ -1960,7 +1878,7 @@ namespace caxa3dcodenameextraction
             if (!reached)
             {
                 r.TitleBlockInfo = "标题栏 3D 信息 300 秒内无结果（CRX 未确认变化）";
-                r.Notes.Add("标题栏 3D 信息设置超时，请查看 %TEMP%\\caxa3dsheetunfoldnameupdate_crx.log 里的 tb-* 记录。");
+                r.Notes.Add("标题栏 3D 信息设置超时，请查看 %TEMP%\\caxa3dcodenameextraction_crx.log 里的 tb-* 记录。");
             }
             else if (tbOk)
             {
