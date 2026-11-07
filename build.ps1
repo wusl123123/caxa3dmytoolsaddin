@@ -48,26 +48,28 @@ $plugins = @(
     # 以及图纸环境预热用的载体图纸 .exb（缺它冷启动预热直接失效，见插件总结「图纸环境预热」）
     @{ Name = 'caxa3dcodenameextraction';    Project = (Join-Path $root 'plugins\caxa3dcodenameextraction\caxa3dcodenameextraction.csproj');
        Extra = @('.crx', '.txt', '.ini', '.exe', '.ps1', '.exb') },
-    # 材料工具：需带色卡.xml 与资料库种子 自定义材料.xml
+    # 材料工具：需带色卡.xml 与资料库种子 自定义材料.xml，以及回填规则模板 caxa3dsetMaterialaddfix.txt
+    # （模板缺席时 BackfillRule 会静默回落到内置 DefaultText，改了项目内模板也不会生效）
     @{ Name = 'caxa3dsetMaterial';           Project = (Join-Path $root 'plugins\caxa3dsetMaterial\caxa3dsetMaterial.csproj');
-       Extra = @('.xml') },
+       Extra = @('.xml', '.txt') },
     # 刷新图纸视图：除 DLL 外还要带图纸环境 CRX 桥本体与 CRX 注册/卸载脚本
     @{ Name = 'caxa3dCXDFTViewUpdate';       Project = (Join-Path $root 'plugins\caxa3dCXDFTViewUpdate\caxa3dCXDFTViewUpdate.csproj');
        Extra = @('.crx', '.ps1') },
     # 树形BOM：需带默认表头模板 .xlsx 与合并规则种子 .txt
     @{ Name = 'caxa3dTreeBom';               Project = (Join-Path $root 'plugins\caxa3dTreeBom\caxa3dTreeBom.csproj');
        Extra = @('.txt') },
-    # 小工具合集：需带坐标数据示例 .txt
+    # 小工具合集：需带坐标数据示例 .txt，以及「删除所有布局(除模型)」用的图纸环境 CRX 桥 .crx
     @{ Name = 'caxa3dminitool';              Project = (Join-Path $root 'plugins\caxa3dminitool\caxa3dminitool.csproj');
-       Extra = @('.txt') },
+       Extra = @('.txt', '.crx') },
     # 折弯管理大师：需带使用说明 .txt
     @{ Name = 'caxa3dsheetmaster';           Project = (Join-Path $root 'plugins\caxa3dsheetmaster\caxa3dsheetmaster.csproj');
        Extra = @('.txt') },
-    # 图纸环境矩形测试：需带 CRX 桥接模块 .crx 与模块登记 .info
-    @{ Name = 'caxa3dexbtest';               Project = (Join-Path $root 'plugins\caxa3dexbtest\caxa3dexbtest.csproj');
-       Extra = @('.crx', '.info') },
-    # 设置备份（系统工具列）：原独立 Add-in 的内置插件内核，仅 DLL，无额外资源
-    @{ Name = 'caxa3dsetbackup';             Project = (Join-Path $root 'plugins\caxa3dsetbackup\caxa3dsetbackup.csproj') },
+    # 工程图技术要求备份（系统工具列）：纯文件 + 注册表操作，无自带资源，只有 DLL
+    @{ Name = 'caxa3dexbTechSpecsbak';       Project = (Join-Path $root 'plugins\caxa3dexbTechSpecsbak\caxa3dexbTechSpecsbak.csproj') },
+    # 批量大师（常用列）：需带默认属性表格 .xlsx、两张用户规则 .txt、图纸环境 CRX 桥
+    # caxa3dBatchMasterView.crx（第 5 登记点，缺它「刷新工程图」整链不可用）与预热图纸 .exb
+    @{ Name = 'caxa3dBatchMaster';           Project = (Join-Path $root 'plugins\caxa3dBatchMaster\caxa3dBatchMaster.csproj');
+       Extra = @('.txt', '.crx', '.exb') },
     # 后台进程清理（独立插件列）：DLL 只是启动器，真正干活的是随包部署的 caxa3didcskill.exe
     @{ Name = 'caxa3didcskill';              Project = (Join-Path $root 'plugins\caxa3didcskill\caxa3didcskill.csproj');
        Extra = @('.exe'); ExtraSrc = @($idcToolExe) }

@@ -1,3 +1,5 @@
+﻿// 机械移植自工程 caxa3dexbtracker 的 ChangeLinksProbe.cs（全文件）。仅改 namespace 与项目内资源名，逻辑未动。
+// 机械移植自工程 caxa3dcodenameextraction 的 ChangeLinksProbe.cs（全文件）。仅改 namespace，逻辑未动。
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -66,13 +68,11 @@ namespace caxa3dcodenameextraction
         /// <summary>探针是否在跑（只有跑的时候才接管「浏览文件夹」，平时留给通用代点）。</summary>
         public static bool IsArmed { get { return _armed; } }
 
-        /// <summary>
-        /// 逐行日志的去向（11-02 用户口径：不再是一段独立「探针 log」，直接并进主程序日志流）。
-        /// MainForm 注入的是**异步**投递（BeginInvoke）：本状态机跑在代点线程上，而这段时间主线程
-        /// 常在 CAXA 的嵌套模态泵里；同步 Invoke 一旦碰上不泵消息的原生阻塞，代点线程会跟着卡死，
-        /// 对话框没人填、主线程白等 600 秒。BeginInvoke 不阻塞调用方，最多丢一行。
-        /// </summary>
-        public static Action<string> Log;
+        // 逐行日志的去向：<b>只有 Diagnostics 这一条通道</b>（11-02 用户口径：直接并进主程序日志流）。
+        // 以前这里另有一个 MainForm 注入的 Action<string> Log 转发器，而 Diagnostics.Log 本身就会把
+        // 每行转发给界面日志区（Diagnostics.UiLogSink = AppendLog，AppendLog 自带跨线程 BeginInvoke）
+        // ⇒ 同一句话在 trace 文件和日志区各出现两遍（实机 11:48:31.395 那对
+        // 「ChangeLinks: 目标：…」+「    目标：…」）。转发器与它的支持代码一并删除（坑 157/156）。
 
         /// <summary>主线程投命令前调用，把目标路径交给后台线程。</summary>
         public static void Begin(string targetIcs, string targetFolder)
@@ -98,7 +98,6 @@ namespace caxa3dcodenameextraction
                 _stepStarted = false;
                 PopupAutoYes.FileDialogTarget = null;   // 上一轮残留会把无关「打开」框填成我们的路径
                 _msaaBlind = false;
-                _dirBlindFor = IntPtr.Zero;
                 _dirChannelDead = false;
                 _armed = true;
             }
@@ -112,7 +111,6 @@ namespace caxa3dcodenameextraction
                 _armed = false;
                 _stage = StageDone;
                 _handedBack = false;
-                Log = null;          // 解除武装同时断掉实时转发，避免残留 sink 把后来的行写进已关闭的窗体
                 PopupAutoYes.FileDialogTarget = null;
                 var copy = new List<string>(_report);
                 _report.Clear();     // 交回即清空：RunLongFlow 的 finally 还会再 End() 一次，别把同一段话播两遍
@@ -223,11 +221,14 @@ namespace caxa3dcodenameextraction
         private const int XFolder = 280;
 
         /// <summary>
-        /// 等子框（「打开」/「浏览文件夹」）出现的上限。实机双击后 195~230 ms 必现，后台线程 120 ms 一跳；
-        /// 原来写 6000 是没数据时的保守值，代价全落在"不存在的最后一行"上：10:36 那轮 8.8 秒的
-        /// 对话框阶段里 5.9 秒是白等的（67%）。3 秒仍是实测的 13 倍余量。
+        /// 等子框（「打开」/「浏览文件夹」）出现的上限 —— <b>同一判据只有一档</b>：
+        /// 「双击投下去到不了子框」= 这一列点不开 / 行已走完。
+        /// 实机双击后 195~270 ms 子框必现（11:48:31.527 投 → 31.798 读到 = 271 ms），
+        /// 后台线程 120 ms 一跳 ⇒ 2000 ms = 实测最迟到达的 ~7.4 倍，仍是安全档。
+        /// 原来这里 3000、StageFile 的同一判据写 6000、最后一行白等 2.98 秒
+        /// （实机 11:48:32.757 投第 3 行 → 35.737 才判"行已走完"）。
         /// </summary>
-        private const int SubDialogMs = 3000;
+        private const int SubDialogMs = 2000;
 
         // ------------------------------------------------------------ 状态
 
@@ -245,8 +246,7 @@ namespace caxa3dcodenameextraction
         private static bool _didFolder;            // 本行真的填过「浏览文件夹」并等它关闭
         private static bool _verifyOnly;           // 只验文件夹、不改文件名
         private static bool _msaaBlind;            // MSAA 侧一个单元格都读不到（本版实测如此），别再走全树
-        private static IntPtr _dirBlindFor;        // 这张「打开」已用无障碍扫过、仍读不到查找范围
-        private static bool _dirChannelDead;       // 四条通道全空过一次：本版的「查找范围」就是取不到，别再为验证开框
+        private static bool _dirChannelDead;       // 四条通道全空过一次：本版的「查找范围」就是取不到，本轮别再走全树、别再为验证开框
         private static string _dirHow = "";        // 目录是从哪条通道读到的，只写进日志不参与判定
         private static int _fileClicks;
         private static string _ics = "", _folder = "", _fileBase = "";
@@ -386,8 +386,9 @@ namespace caxa3dcodenameextraction
                         IntPtr ofd = OpenDialog();
                         if (ofd == IntPtr.Zero)
                         {
-                            // 双击投下去 6 秒没「打开」= 这一行（以及它后面所有行）不存在
-                            if (Expired(6000)) EndOfRows(dlg);
+                            // 双击投下去到不了子框 = 这一行（以及它后面所有行）不存在。
+                            // 与 StagePeek 那一处同一判据、同一档（原来这里另写 6000，最后一行白等近 6 秒）
+                            if (Expired(SubDialogMs)) EndOfRows(dlg);
                             break;
                         }
                         _read = true;
@@ -843,11 +844,11 @@ namespace caxa3dcodenameextraction
         /// <summary>
         /// 读「打开」框的「查找范围」下拉框 = 这一行现在的**文件夹**。
         /// 这是唯一能证明「在文件夹」列真的改到位的观测点（网格单元格读不到）。
-        /// 三条通道依次试：① 编辑框里就是全路径；② 下拉框自报文字；③ 下拉框**内嵌**的 Edit
+        /// 四条通道依次试：① 编辑框里就是全路径；② 下拉框自报文字；③ 下拉框**内嵌**的 Edit
         /// ——Vista 风格文件框外层 GetWindowText 是空的，文字在里面那层（实机 10:36/10:38 只走到
         /// ①②，所以全线「（读不到）」，还顺带产出两句假警报「那一列没改上」）；④ 无障碍树里
-        /// 名字像绝对目录的节点。全读不到就记住这张框（_dirBlindFor），同一张「打开」不再重复扫全树，
-        /// 判定按 DirUnknown 走 —— 不能把"读不到"当"目录不对"。
+        /// 名字像绝对目录的节点。四条全空 ⇒ 本轮判死（<see cref="_dirChannelDead"/>），后面的行不再逐行
+        /// 走全树；判定按 DirUnknown 走 —— 不能把"读不到"当"目录不对"。
         /// </summary>
         private static string OpenBoxDir(IntPtr ofd)
         {
@@ -878,10 +879,12 @@ namespace caxa3dcodenameextraction
             if (editPath.Length > 0) { _dirHow = "窗口·编辑框全路径"; return DirOf(editPath); }
             if (combo.Length > 0) { _dirHow = "窗口·下拉框"; return combo; }
 
-            if (_dirBlindFor == ofd) return "";        // 这张框已经扫过一遍无障碍，别再走全树
+            // 轮级短路：本轮已经证明这四条通道取不到值 ⇒ 后面的行不再逐行走 800 节点全树。
+            // 原来按句柄记（_dirBlindFor），但每行双击弹出的「打开」都是**新句柄**，
+            // 判死标志永远命中不了 —— 实机 11:48 一轮 2 行就是 2 次全树（各 736 节点，零命中）。
+            if (_dirChannelDead) { _dirHow = "四条通道全空（本轮已判死）"; return ""; }
             string viaMsaa = DirFromMsaa(ofd);
             if (viaMsaa.Length > 0) { _dirHow = "无障碍·节点名"; return viaMsaa; }
-            _dirBlindFor = ofd;
             _dirChannelDead = true;
             _dirHow = "四条通道全空";
             return "";
@@ -934,16 +937,14 @@ namespace caxa3dcodenameextraction
         // ------------------------------------------------------------ 反馈
 
         /// <summary>
-        /// 每行既进 trace 文件，也实时并进主程序日志（<see cref="Log"/>，11-02 用户口径）。
-        /// v7 曾经「只落文件、收尾一次性回放」，实机确实不再打两遍，但把过程压到结束后才看到，
-        /// 界面上这段就没有反馈了；现在回放已经删掉，所以实时一条、播出一行，仍不会重复。
+        /// 逐行反馈：<b>一行一句、一条通道</b>。Diagnostics.Log 自己就会落 trace 文件并转发界面日志区
+        /// （AppendLog 内部按线程 BeginInvoke），所以这里再挂转发器 = 文件和界面各打两遍
+        /// （实机 11:48:31.395 那对重复行）。v7 的"收尾一次性回放"早已删掉，过程仍是实时可见。
         /// </summary>
         private static void Say(string line)
         {
             _report.Add(line);
-            Diagnostics.Trace("ChangeLinks: " + line);
-            Action<string> live = Log;
-            if (live != null) live("    " + line);
+            Diagnostics.Log("ChangeLinks: " + line);
         }
 
         private static string Join(List<string> items)

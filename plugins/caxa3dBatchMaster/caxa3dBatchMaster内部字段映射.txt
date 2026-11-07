@@ -1,0 +1,8 @@
+﻿# caxa3dBatchMaster 内部字段映射：每行一条「表格列显示名=CAXA 自定义属性内部字段名」
+# 以 # 或 // 开头的行是注释；空行忽略；等号两侧空格自动去掉。
+# 生效位置：%APPDATA%\caxa3dBatchMaster\ ；改完保存即生效（按文件修改时间热重载，不必重启 CAXA）。
+# 没在这里出现的列＝直接拿列显示名当内部字段名用。
+# 注意：内部字段名区分大小写，请照 CAXA 属性对话框/TLB 里的写法抄，不要猜。
+重量=PartMass
+# 日期列内部字段名待实机确认：先按几种常见写法都试一遍（命中即停），跑完看 trace 里的 ExportSelfBOM.labels 再收敛
+日期=日期,Date,PartDate,CreateDate,ModifyDate

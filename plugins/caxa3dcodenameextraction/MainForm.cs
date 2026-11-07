@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -57,6 +57,7 @@ namespace caxa3dcodenameextraction
         /// 在 IsCrxLoaded 上分不出来，靠这个标记把两者区分开，免得按钮一闪变红像失败。</summary>
         private bool _warmedOnce;
         private Button _btnRegen;
+        private Button _btnUpdate3DBom;
         private Button _btnStop;
         private readonly SheetSizeRule _sheetSizeRule = SheetSizeRule.Load();
         private Button _btnTopMost;
@@ -73,6 +74,13 @@ namespace caxa3dcodenameextraction
 
         internal static readonly string AppTitleBase = "带图改名及图号分离";
 
+        // ↓↓↓ 键盘归属抢救：Ctrl+C/V/X/A/Z 归本窗口自己的文本框（机理/开关/取证见 Caxa3dMyTools.Contracts.ChordRescue）
+        protected override void OnActivated(EventArgs e) { base.OnActivated(e); Caxa3dMyTools.Contracts.ChordRescue.Install(this, msg => Diagnostics.Trace(msg)); }
+        protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口失活"); }
+        protected override void OnFormClosed(FormClosedEventArgs e) { base.OnFormClosed(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口关闭"); }
+        protected override void WndProc(ref Message m) { if (Caxa3dMyTools.Contracts.ChordRescue.Route(this, ref m)) return; base.WndProc(ref m); }
+        // ↑↑↑
+
         public MainForm(IZBaseApp siteApp)
         {
             _siteApp = siteApp;
@@ -81,7 +89,13 @@ namespace caxa3dcodenameextraction
             // 归属判定用 FlowGate.IsBusyBy，别关掉另一个窗口（带图独立）正在跑的流程。
             FormClosing += (sender, e) =>
             {
-                Diagnostics.UiLogSink -= AddLog;
+                Diagnostics.UiLogSink -= AddLogLive;
+                // 兜底收租：窗口没了就没有"下一次归还"，漏还的租约只能在这里强制收回，
+                // 否则代点引擎带着已死窗口的日志 sink 继续后台跑（规则：没人还必须结构上不可能）。
+                PopupAutoYes.ReleaseAll("工具窗已关闭");
+                // 工具窗一关就撤掉「更新3D明细」对话框哨兵：它还活着就会继续找框、勾「更新」、点「确定」，
+                // 而这时已经没有界面在等这个结果了（外抛的点击等于替用户做决定）。
+                DlgUpdate3DBom.Disarm();
                 if (FlowGate.IsBusyBy(AppTitleBase))
                 {
                     FlowGate.StopRequested = true;
@@ -89,7 +103,10 @@ namespace caxa3dcodenameextraction
                 }
             };
             BuildUi();
-            Diagnostics.UiLogSink += AddLog;
+            // 单通道：模块内部一律 Diagnostics.Log，由它落 trace 后转发到这里。
+            // sink 必须是 AddLogLive（只 BeginInvoke）——AddLog 的同步 Invoke 在后台线程
+            // 撞上主线程不泵消息的原生调用时两边互等，实机卡过 600 秒。
+            Diagnostics.UiLogSink += AddLogLive;
             if (!IsHandleCreated) CreateHandle();
             LoadRules();
             AddLog("程序启动成功");
@@ -134,9 +151,9 @@ namespace caxa3dcodenameextraction
                 _btnTopMost, _btnRules, _btnHelp, _btnRefresh,
                 _btnRegCrx, _btnUnregCrx, _btnSaveLog, _btnClearLog });
 
-            // 高度跟着按钮区收：4 列 2 行最后一行底边 284，留 32 给底部边距；
-            // 省下的 32 px 直接还给下面的日志区。
-            var panelBody = new Panel { Dock = DockStyle.Top, Height = 316, Padding = new Padding(10) };
+            // 高度跟着按钮区收：4 列 3 行最后一行底边 314，留 32 给底部边距；
+            // 省下的空间直接还给下面的日志区。
+            var panelBody = new Panel { Dock = DockStyle.Top, Height = 350, Padding = new Padding(10) };
 
             _lblConnection = new Label
             {
@@ -210,7 +227,7 @@ namespace caxa3dcodenameextraction
             };
             _btnRename = new Button
             {
-                Text = "重命名",
+                Text = "重命名v2.0",
                 Location = new Point(138, 174),
                 Size = new Size(120, 28),
                 BackColor = Color.FromArgb(0, 120, 212),
@@ -219,17 +236,17 @@ namespace caxa3dcodenameextraction
             };
             _btnRename.FlatAppearance.BorderSize = 0;
 
-            // 按钮区表格化：8 个按钮排成 **4 列 × 2 行**，等宽等距。
+            // 按钮区表格化：**4 列等宽等距**，行按 Row1/Row2/Row3 走（Row3 目前只有「更新3dbom」一格）。
             // 原来按文案长短逐个手写 (x,y,w)，改一次文案或换台机器就歪；现在只改列宽/列距两处。
             // 列宽 238 + 列距 8 ⇒ 4*238+3*8 = 976，右边界 986，客户区 1000 之内。
             const int BtnW = 238, GapX = 8, Col0 = 10;
-            const int Row1 = 218, Row2 = Row1 + 34;
+            const int Row1 = 218, Row2 = Row1 + 34, Row3 = Row2 + 34;
             _btnManualSep = MakeButton("手动图号分离", Col0, Row1, BtnW);
             _btnSheetMetal = MakeButton("钣金件设计环境设默认", Col0 + (BtnW + GapX), Row1, BtnW);
             _btnTitleBlock = MakeButton("工程图标题栏设默认", Col0 + 2 * (BtnW + GapX), Row1, BtnW);
             _btnStop = MakeButton("停止", Col0 + 3 * (BtnW + GapX), Row1, BtnW);
-            // 「替换零部件」：UI 代点驱动原生「替换零件/装配」面板，不改名不保存
-            _btnReplaceProbe = MakeButton("替换零部件", Col0, Row2, BtnW);
+            // 「改名替换零部件」：UI 代点驱动原生「替换零件/装配」面板，不改名不保存
+            _btnReplaceProbe = MakeButton("改名替换零部件", Col0, Row2, BtnW);
             // 迁自 caxa3dsheetsizewrite
             _btnSheetSize = MakeButton("钣金件尺寸填写", Col0 + (BtnW + GapX), Row2, BtnW);
             // 「更新工程图链接文件」：进 零件名.exb，把图纸里的外链 ics 改指目标 ics（虚拟件也算）
@@ -241,6 +258,10 @@ namespace caxa3dcodenameextraction
             // 「图纸环境预热」：放在「窗口前置」正下方（panelBody 顶行、同一左边界），
             // 底色就是状态灯 —— 绿=本会话已进过图纸环境（CRX 探针在），红=还没进（开图纸有崩的风险）。
             _btnWarmUp = MakeButton("图纸环境预热", 10, 6, 150);
+            // 「更新3dbom」（迁自 caxa3dexbtracker）：设计环境里选中装配体 → 打开同名 exb →
+            // 派 CX_DFT_Update3DBom → 「更新3D明细」框自动勾「更新」点确定。
+            // 单按钮口径：图纸**打开后不关**（明细要在图上看）；只有在「重命名v2.0」联动链里才保存并关闭。
+            _btnUpdate3DBom = MakeButton("更新3dbom", Col0, Row3, BtnW);
 
             _lblStatus = new Label
             {
@@ -256,7 +277,7 @@ namespace caxa3dcodenameextraction
                 _btnSep, _btnDiff, _btnRename, _btnManualSep, _btnReplaceProbe,
                 _btnChangeLinks, _btnWarmUp, _btnRegen,
                 _btnSheetMetal, _btnTitleBlock, _btnSheetSize,
-                _btnStop, _lblStatus });
+                _btnUpdate3DBom, _btnStop, _lblStatus });
 
             _txtLog = new TextBox
             {
@@ -295,6 +316,7 @@ namespace caxa3dcodenameextraction
             _btnRegen.Click += BtnRegen_Click;
             _btnManualSep.Click += BtnManualSep_Click;
             _btnSheetMetal.Click += BtnSheetMetal_Click;
+            _btnUpdate3DBom.Click += BtnUpdate3DBom_Click;
             _btnTitleBlock.Click += BtnTitleBlock_Click;
             _btnSheetSize.Click += BtnSheetSize_Click;
             _btnStop.Click += (s, e) => StopFlow();
@@ -302,6 +324,9 @@ namespace caxa3dcodenameextraction
             _timer = new System.Windows.Forms.Timer { Interval = 800 };
             _timer.Tick += (s, e) =>
             {
+                // 让位看门狗必须在 Busy 分支之前跑：流程期正是窗口沉底的时候，
+                // 放在 return 之后等于永远不检查（超期就把工具窗永久留在 Z 序底）。
+                RestoreIfOverdue();
                 UpdateWarmUpVisual();
                 if (!Visible || FlowGate.Busy) return;
                 // 800 ms 一次的界面刷新只是为了让「选中件」跟手，不是流程步骤：
@@ -542,7 +567,7 @@ namespace caxa3dcodenameextraction
 
         /// <summary>
         /// 新零件名是否与文件夹内已有 ics 重名。
-        /// 例外：那个 ics 正是当前选中件自己的外链文件时必须放行——「带图独立」和「替换零部件」
+        /// 例外：那个 ics 正是当前选中件自己的外链文件时必须放行——「带图独立」和「改名替换零部件」
         /// 都是先复制/另存出 零件B.ics 再换链接，元素名还停在 零件A，收尾靠的就是把名字改成 零件B；
         /// 按老口径判「重名」会把这一步永远锁死（实机 14:22 替换成功、重命名却点不动，即此）。
         /// </summary>
@@ -764,62 +789,15 @@ namespace caxa3dcodenameextraction
             _rules.Add(new Rule { Text = line.Trim(), Separator = sep, Fields = fields.ToArray() });
         }
 
-        // ================================================================ 重命名主流程
+        // ================================================================ 重命名（V1 路线，只服务「带图独立」）
 
-        private void BtnRename_Click(object sender, EventArgs e)
-        {
-            if (FlowGate.Busy) return;
-            if (_app == null) { MessageBox.Show("尚未连接 CAXA 3D。", AppTitleBase); return; }
-            if (_partInfo == null || !_partInfo.HasElement)
-            {
-                MessageBox.Show("请先在 CAXA 3D 中选中要改名的零部件。", AppTitleBase);
-                return;
-            }
-            if (!_partInfo.ExternallyLinked)
-            {
-                MessageBox.Show(
-                    "当前选中的是虚拟零部件（没有外部 .ics 文件）。\n" +
-                    "请先在 CAXA 3D 中把该零部件“另存为”外部文件（保存成 ics），\n" +
-                    "再选中它点击重命名。",
-                    AppTitleBase, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            string newName = _txtNewName.Text.Trim();
-            if (newName.Length == 0)
-            {
-                MessageBox.Show("请先填写新零件名。", AppTitleBase);
-                return;
-            }
-            if (NewNameExists())
-            {
-                MessageBox.Show(
-                    "文件夹内已存在同名零件：" + newName + ".ics\n不允许重命名，请换一个零件名。",
-                    AppTitleBase, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-            foreach (char c in Path.GetInvalidFileNameChars())
-            {
-                if (newName.IndexOf(c) >= 0)
-                {
-                    MessageBox.Show("新零件名包含非法字符：" + c, AppTitleBase);
-                    return;
-                }
-            }
-
-            Dictionary<string, string> values = null;
-            if (_sepEnabled)
-            {
-                string sepError;
-                if (!TryBuildSepValues(newName, out values, out sepError))
-                {
-                    MessageBox.Show(sepError, AppTitleBase);
-                    return;
-                }
-            }
-
-            RunLongFlow("重命名及图号分离", delegate { RenameCore(newName, values, null); });
-        }
+        /// <summary>
+        /// 界面上的「重命名」按钮已升级为「重命名v2.0」联动链，入口在下方
+        /// 「重命名v2.0（联动链）与更新3dbom」那一节。
+        /// 本节的 <see cref="RenameCore"/> 仍然是「带图独立」的第二步（替换零部件之后按新名落盘），
+        /// 两条路线共用各自的改名实现，不许把它们并成一条：
+        /// V1 = set_Name + Save 让 CAXA 自己改文件名；V2.0 = 反转时序（elem.set_Name → holderDoc.SaveAs）。
+        /// </summary>
 
         /// <summary>
         /// 重命名核心（不带前置校验，可直接被「带图独立」复用）：
@@ -958,7 +936,7 @@ namespace caxa3dcodenameextraction
         }
 
         /// <summary>
-        /// 「带图独立」与「替换零部件」共用的前置校验：
+        /// 「带图独立」与「改名替换零部件」共用的前置校验：
         /// 已连接 + 选中零部件 + 必须是外链件 + 外链文件名==零件名 + 新零件名合法 + 目录可取。
         /// 不通过时自己弹提示并返回 false，保证两个入口口径一致。
         /// </summary>
@@ -1100,7 +1078,7 @@ namespace caxa3dcodenameextraction
         }
 
         /// <summary>
-        /// 「替换零部件」核心（不带前置校验，按钮和「带图独立」共用）：
+        /// 「改名替换零部件」核心（不带前置校验，按钮和「带图独立」共用）：
         ///   1/4 复制 零件A.ics + 同名 零件A.exb → 零件B.ics / 零件B.exb（目标已存在即中止，绝不覆盖）；
         ///   2/4 IZSelectionMgr::AddElementToSelection 把选中件按回活选择集，
         ///       WM_COMMAND 53851 叫出原生「替换零件/装配」面板；
@@ -1164,7 +1142,7 @@ namespace caxa3dcodenameextraction
         }
 
         /// <summary>
-        /// 「替换零部件」按钮：前置校验 + 调用 <see cref="ReplacePartCore"/>。
+        /// 「改名替换零部件」按钮：前置校验 + 调用 <see cref="ReplacePartCore"/>。
         /// 单点这个按钮到此为止 —— 不改名、不做图号分离、不保存；
         /// 设计树现在应显示 零件B.ics - 零件A，确认无误后用「重命名」修正，或直接改用「带图独立」一把跑完。
         /// </summary>
@@ -1175,7 +1153,7 @@ namespace caxa3dcodenameextraction
             if (!TryPrepareIndependence(out oldBase, out newName, out srcFolder, out dstFolder, out newIcs))
                 return;
 
-            RunLongFlow("替换零部件", delegate
+            RunLongFlow("改名替换零部件", delegate
             {
                 ReplacePartCore(oldBase, newName, srcFolder, dstFolder, newIcs);
                 AddLog("    本按钮到此为止：不改名、不分离、不保存。");
@@ -1183,27 +1161,67 @@ namespace caxa3dcodenameextraction
         }
 
         /// <summary>
-        /// 「更新工程图链接文件」前置校验（11-02 用户口径）。虚拟零部件**允许**：
-        /// 本功能只改图纸里视图的外链指向，不动 3D 元素对象。两种选法的目标列不同：
-        ///   外链件「设计环境A.ics --- 零件名B」→ 在文件夹＝**外链 ics 所在目录**，文件名＝零件名B.ics
-        ///   虚拟件「零件名C.ics --- 零件名C」  → 在文件夹＝**设计环境文档所在目录**，文件名＝零件名C.ics
-        ///     虚拟件本身没有外链，它的外链就是设计环境文档，所以**必须要求文档名==零件名**，
-        ///     否则无从判断图纸该指到哪个 ics（直接拒绝，不猜）。
-        /// 还要有同名 exb 才进得去图纸。
+        /// 「更新工程图链接文件」前置校验。两条口径按顺序试：
+        ///
+        /// ① 实时选中（<see cref="LinkRenameSync.PrepareChangeLinksTarget"/>）——**首选**。
+        ///    它每次都现读 `ActiveDoc` 的选择集，并且目标文件名**跟外链 ics 自己的文件名**、
+        ///    不跟设计树上的显示名：钣金件外链且当前配置非默认时两者不一致（实机 11-05 13:26:42
+        ///    选中名「SC08020102.03-05 折弯板」，盘上只有「展开SC08020102.03-05 折弯板.ics/.exb」），
+        ///    按显示名拼路径必然"目标不存在"。逐行原因进日志（`cl:` 前缀）。
+        /// ② 界面缓存的探测快照（<see cref="TryPrepareChangeLinksCached"/>）——退路，
+        ///    另外带"同名 exb 到多个文件夹里找"的能力（①只看目标文件夹那一处）。
+        ///
+        /// 两条都不成才弹框，弹的是②给的人话原因。
         /// </summary>
         private bool TryPrepareChangeLinks(out string icsPath, out string exbPath, out string folder)
         {
             icsPath = null; exbPath = null; folder = null;
             if (_app == null) { MessageBox.Show("尚未连接 CAXA 3D。", AppTitleBase); return false; }
+
+            if (_siteApp != null)
+            {
+                string liveIcs, liveExb, liveFolder, liveName;
+                if (LinkRenameSync.PrepareChangeLinksTarget(_siteApp, delegate (string s) { AddLog(s); },
+                        out liveIcs, out liveExb, out liveFolder, out liveName))
+                {
+                    icsPath = liveIcs; exbPath = liveExb; folder = liveFolder;
+                    return true;
+                }
+                AddLog("更新链接文件：实时选中这条口径没通过，改按界面上一次探测的快照再判一次。");
+            }
+
+            string reason;
+            if (TryPrepareChangeLinksCached(out icsPath, out exbPath, out folder, out reason)) return true;
+
+            // 失败时不留半套值，免得调用方拿着 ics 却配了别处的 exb
+            icsPath = null; exbPath = null; folder = null;
+            MessageBox.Show(reason, AppTitleBase, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        /// <summary>
+        /// 退路口径（11-02 用户口径）。虚拟零部件**允许**：本功能只改图纸里视图的外链指向，
+        /// 不动 3D 元素对象。两种选法的目标列不同：
+        ///   外链件「设计环境A.ics --- 零件名B」→ 在文件夹＝**外链 ics 所在目录**，文件名＝零件名B.ics
+        ///   虚拟件「零件名C.ics --- 零件名C」  → 在文件夹＝**设计环境文档所在目录**，文件名＝零件名C.ics
+        ///     虚拟件本身没有外链，它的外链就是设计环境文档，所以**必须要求文档名==零件名**，
+        ///     否则无从判断图纸该指到哪个 ics（直接拒绝，不猜）。
+        /// 还要有同名 exb 才进得去图纸（这条比实时口径宽：允许在独立功能/外链件所在文件夹里）。
+        /// 不弹框，原因用 <paramref name="reason"/> 交回调用方统一处置。
+        /// </summary>
+        private bool TryPrepareChangeLinksCached(out string icsPath, out string exbPath,
+            out string folder, out string reason)
+        {
+            icsPath = null; exbPath = null; folder = null; reason = null;
             if (_partInfo == null || !_partInfo.HasElement)
             {
-                MessageBox.Show("请先在 CAXA 3D 设计环境里选中要处理的零部件。", AppTitleBase);
+                reason = "请先在 CAXA 3D 设计环境里选中要处理的零部件，再点「探测选中」（或重新选中）。";
                 return false;
             }
             string name = _partInfo.ElementName;
             if (string.IsNullOrEmpty(name))
             {
-                MessageBox.Show("取不到选中零部件的名字。", AppTitleBase);
+                reason = "取不到选中零部件的名字。";
                 return false;
             }
 
@@ -1218,14 +1236,14 @@ namespace caxa3dcodenameextraction
                     ? null : Path.GetFileNameWithoutExtension(_docName);
                 if (docBase == null)
                 {
-                    MessageBox.Show("取不到设计环境文档名，无法为虚拟零部件判定目标 ics。", AppTitleBase);
+                    reason = "取不到设计环境文档名，无法为虚拟零部件判定目标 ics。";
                     return false;
                 }
                 if (!string.Equals(docBase, name, StringComparison.OrdinalIgnoreCase))
                 {
-                    MessageBox.Show("选中虚拟零部件时要求「设计环境 == 零件名」。\n当前是 " + docBase +
+                    reason = "选中虚拟零部件时要求「设计环境 == 零件名」。\n当前是 " + docBase +
                         ".ics --- " + name + "（虚拟）。\n请先把这个虚拟件另存为同名 " + name +
-                        ".ics 的设计环境，或改选一个同名件。", AppTitleBase);
+                        ".ics 的设计环境，或改选一个同名件。";
                     return false;
                 }
                 try { folder = Path.GetDirectoryName(_docName); }
@@ -1234,23 +1252,22 @@ namespace caxa3dcodenameextraction
             }
             if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
             {
-                MessageBox.Show("取不到目标文件夹（外链路径异常：" + _partInfo.LinkedFile + "）。",
-                    AppTitleBase);
+                reason = "取不到目标文件夹（外链路径异常：" + _partInfo.LinkedFile + "）。";
                 return false;
             }
 
             icsPath = Path.Combine(folder, name + ".ics");
             if (!File.Exists(icsPath))
             {
-                MessageBox.Show("目标链接文件不存在：" + icsPath + "\n" +
-                    "「改变链接文件」要指的就是它，请先按同名 ics/exb 的口径把它存出来。", AppTitleBase);
+                reason = "目标链接文件不存在：" + icsPath + "\n" +
+                    "「更新工程图链接文件」要指的就是它，请先按同名 ics/exb 的口径把它存出来。";
                 return false;
             }
             exbPath = FindDrawingFile(name, folder);
             if (exbPath == null)
             {
-                MessageBox.Show("找不到图纸 " + name + ".exb（找过：" + folder + "、" +
-                    IndependenceFolder() + "、" + PartFolder() + "）。", AppTitleBase);
+                reason = "找不到图纸 " + name + ".exb（找过：" + folder + "、" +
+                    IndependenceFolder() + "、" + PartFolder() + "）。";
                 return false;
             }
             return true;
@@ -1289,12 +1306,11 @@ namespace caxa3dcodenameextraction
         /// 更新工程图链接核心（不带前置校验，按钮和「带图独立」共用）：
         /// 1/4 进图纸环境 → 2/4 派发 CX_DFT_ChangeLinks，后台线程逐行改「在文件夹」「文件名」并点「确定」
         /// → 3/4 等 CRX 报命令结束（= 对话框关掉那一刻，权威完成信号）→ 4/4 保存并关闭这张图纸。
-        /// 后台线程的逐行反馈实时并进主程序日志（ChangeLinksProbe.Log）。
+        /// 后台线程的逐行反馈走唯一通道 `Diagnostics.Log` → `UiLogSink` → 界面日志区。
         /// </summary>
         private void UpdateDrawingLinksCore(string icsPath, string exbPath, string folder)
         {
             string fileName = Path.GetFileName(exbPath);
-            ChangeLinksProbe.Log = AddLogLive;
 
             AddLog("1/4 进图纸环境 " + fileName);
             DateTime openStart = DateTime.Now;
@@ -1490,7 +1506,7 @@ namespace caxa3dcodenameextraction
             Warm("    预热成功：耗时 " + (int)(DateTime.Now - t0).TotalSeconds + " 秒 —— CRX 探针出现" +
                  (openEnded ? "、CX_open_Impl 已结束" : "") + "。预热图纸「" + Path.GetFileName(warmExb) + "」" +
                  (closeRightAway ? "随即不保存关掉" : "保持开着当热状态载体（目标图纸打开后再关）"));
-            PopupAutoYes.WatchLatePopups(30000, "图纸环境预热");
+            // 代点由调用方的流程租约（RunLongFlow 里的 Borrow）覆盖，预热内部不再单独起巡检线程。
 
             if (closeRightAway)
             {
@@ -1512,7 +1528,7 @@ namespace caxa3dcodenameextraction
         {
             string p = FindResource("caxa3d图纸环境预热.exb");
             if (p != null) return p;
-            string dev = @"C:\code\ICAPI\caxa3dmytoolsaddin\plugins\caxa3dcodenameextraction\caxa3d图纸环境预热.exb";
+            string dev = @"C:\code\ICAPI\caxa3dmytoolsaddin\caxa3d图纸环境预热.exb";
             return File.Exists(dev) ? dev : null;
         }
 
@@ -1797,17 +1813,6 @@ namespace caxa3dcodenameextraction
             int viewBase = LogCount("commandEnded | CX_DFT_ViewClose");
             int blindBase = LogCount("CLOSEDOC.name-mismatch") + LogCount("CLOSEDOC.no-window");
 
-            // 投命令前的安全闸门：确认这张图纸窗口真的在。
-            // 老版 CRX 的 CloseDocWindows 还留着「文件名没匹配上 ⇒ 退化为关全部 MDI 子窗口」的兜底，
-            // 一旦目标图纸根本没开（改名没落盘 / 冷启动打开失败），投下去会把 3D 设计环境一起关掉
-            //（规则坑 141：11:29:17 实机就是这样整个设计环境被连带关掉）。
-            // 新版 CRX 已按名匹配、匹配不上一个都不关；这里再做一层，两版都安全。
-            if (!WaitUntil("确认图纸窗口在 " + fileName, 3000, () => DocWindowExists(fileName), 150))
-            {
-                AddLog("    图纸「" + fileName + "」现在没开着 —— 不投关闭命令（避免误关设计环境），请人工处理这一张");
-                return false;
-            }
-
             CrxBridge.PostCommand("CMD:CLOSEDOC|" + fileName);
 
             bool closed = WaitUntil("保存并关闭图纸 " + fileName, 30000, () =>
@@ -1853,9 +1858,630 @@ namespace caxa3dcodenameextraction
             return "";
         }
 
+        // ================================================================ 重命名v2.0（联动链）与更新3dbom
+
+        /// <summary>联动链的原子步骤 —— 每步就是界面上那颗同名按钮的流程本体，不另写第二份实现。</summary>
+        private enum ChainStep { Rename, ChangeLinks, Update3DBom, SheetMetalDefault, TitleBlock }
+
+        /// <summary>「更新3D明细」哨兵的收尾结论（后台线程写、UI 线程读）。</summary>
+        private volatile string _bomSentinelResult;
+
+        // ── 让位状态 ── DlgUpdate3DBom 用**屏幕 BitBlt** 定位「更新」复选框，本窗常态置顶会压在
+        //    宿主原生对话框上面，哨兵抓到的全是自己窗口的像素（exbtracker 实机 17:10:18 连点 7 次无反应）。
+        private bool _behind;
+        private bool _behindTopMost;
+        private int _behindTick;
+        private const int BehindMaxMs = 240000;
+
+        /// <summary>类型 → 链条（照 caxa3dexbtracker 2026-11-05 定案口径）。认不了的类型返回 null，绝不猜着往下跑。</summary>
+        private static ChainStep[] StepsForType(int etype)
+        {
+            if (etype == 1)
+                return new ChainStep[] { ChainStep.Rename, ChainStep.ChangeLinks };
+            if (etype == 2)
+                return new ChainStep[] { ChainStep.Rename, ChainStep.ChangeLinks, ChainStep.Update3DBom };
+            if (etype == 20)
+                return new ChainStep[] { ChainStep.Rename, ChainStep.SheetMetalDefault,
+                                         ChainStep.ChangeLinks, ChainStep.TitleBlock };
+            return null;
+        }
+
+        private static string StepLabel(ChainStep step)
+        {
+            switch (step)
+            {
+                case ChainStep.Rename: return "重命名v2.0";
+                case ChainStep.ChangeLinks: return "更新工程图链接文件";
+                case ChainStep.Update3DBom: return "更新3dbom";
+                case ChainStep.SheetMetalDefault: return "钣金件设默认";
+                default: return "标题栏设默认";
+            }
+        }
+
+        /// <summary>
+        /// 「重命名v2.0」= 联动链入口（替代原「重命名」按钮，链条按选中件类型分流）：
+        ///   1 零件 ：重命名v2.0（含图号分离）→ 更新工程图链接文件
+        ///   2 装配 ：… → 更新工程图链接文件 → 更新3dbom（这步自己开一次图纸环境，链收尾保存并关闭）
+        ///   20 钣金：… → 钣金件设默认 → 更新工程图链接文件 → 标题栏设默认
+        /// 中止口径：任一步没成立即停链，绝不把后面的破坏性步骤接上去。
+        /// </summary>
+        private void BtnRename_Click(object sender, EventArgs e)
+        {
+            if (FlowGate.Busy) return;
+            if (_app == null) { MessageBox.Show("尚未连接 CAXA 3D。", AppTitleBase); return; }
+
+            int etype;
+            string elemName;
+            if (!LinkRenameSync.ProbeSelection(_siteApp, AddLog, out etype, out elemName))
+            {
+                MessageBox.Show("重命名v2.0：认不出选中的零部件（前台不是设计环境 / 没有选中件 / 取不到名），" +
+                    "原因见日志。", AppTitleBase, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            ChainStep[] steps = StepsForType(etype);
+            if (steps == null)
+            {
+                MessageBox.Show("重命名v2.0：type=" + etype + " 不在支持范围（1=零件 2=装配 20=钣金），已中止。",
+                    AppTitleBase, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var labels = new string[steps.Length];
+            for (int i = 0; i < steps.Length; i++) labels[i] = StepLabel(steps[i]);
+            RunLongFlow("重命名v2.0（" + string.Join(" → ", labels) + "）",
+                delegate { RunLinkedChain(steps, elemName, etype); });
+        }
+
+        /// <summary>联动链本体（跑在 RunLongFlow 里，全程 UI 线程同步 + 各步自己的等待）。</summary>
+        private void RunLinkedChain(ChainStep[] steps, string elemName, int etype)
+        {
+            AddLog("选中「" + elemName + "」type=" + etype + "（1=零件 2=装配 20=钣金）");
+
+            // V2.0 只换文件名、不换目录 ⇒ 改名前的外链目录就是改名后 ics/exb 的目录，
+            // 后面几步在"实时选区认不出来"时靠它兜底定位（不是猜：是这条路线自己的事实）。
+            string oldLinked = _partInfo != null && _partInfo.ExternallyLinked ? _partInfo.LinkedFile : null;
+            string baseFolder = null;
+            try { if (!string.IsNullOrEmpty(oldLinked)) baseFolder = Path.GetDirectoryName(oldLinked); }
+            catch { baseFolder = null; }
+            if (string.IsNullOrEmpty(baseFolder)) baseFolder = PartFolder();
+
+            string newName = null;
+            int done = 0;
+            try
+            {
+                for (int i = 0; i < steps.Length; i++)
+                {
+                    DiffRenameTool.CheckStop();
+                    ChainStep step = steps[i];
+                    AddLog("");
+                    AddLog("—— 第 " + (i + 1) + "/" + steps.Length + " 步 " + StepLabel(step) + " ——");
+
+                    switch (step)
+                    {
+                        case ChainStep.Rename:
+                            if (!RunRenameStepV2(out newName))
+                                throw new Exception("改名没走到「═══ 结论（外链件…）」那一行 —— 准入闸拒绝、" +
+                                    "新名校验没过或中途失败（上面 sync: 各行有原因），链已中止，后面 " +
+                                    (steps.Length - i - 1) + " 步未执行。");
+                            break;
+
+                        case ChainStep.ChangeLinks:
+                            string ci, ce, cf;
+                            if (!TryChainChangeLinksTarget(newName, baseFolder, out ci, out ce, out cf))
+                                throw new Exception("「更新工程图链接文件」的前置没成立（改名后的 ics/exb 定位不到），" +
+                                    "链已中止，后面 " + (steps.Length - i - 1) + " 步未执行。");
+                            UpdateDrawingLinksCore(ci, ce, cf);
+                            break;
+
+                        case ChainStep.Update3DBom:
+                            Update3DBomCore(true, ChainExbPath(newName, baseFolder));
+                            break;
+
+                        case ChainStep.SheetMetalDefault:
+                            SheetMetalDefaultCore();
+                            break;
+
+                        default:
+                            string tbExb = ChainExbPath(newName, baseFolder);
+                            if (tbExb == null)
+                                throw new Exception("找不到改名后的图纸「" + newName + ".exb」，标题栏这一步没法做，" +
+                                    "链已中止。");
+                            UpdateTitleBlock(tbExb);
+                            break;
+                    }
+                    done = i + 1;
+                }
+            }
+            finally
+            {
+                AddLog("联动链结束 —— 计划 " + steps.Length + " 步，完成 " + done + " 步");
+                if (done != steps.Length)
+                {
+                    AddLog("    未完成的那 " + (steps.Length - done) + " 步一律没执行；已做过的步骤各有结论行，" +
+                        "按铁律不补做、不重试。");
+                }
+            }
+
+            if (newName != null)
+            {
+                _lastOldName = newName;
+                SetNewNameText("");
+            }
+            bool all = done == steps.Length;
+            _lblStatus.Text = all ? "重命名v2.0 完成: " + newName + "（" + done + " 步全过）"
+                                  : "重命名v2.0 未完成（完成 " + done + "/" + steps.Length + " 步，原因见日志）";
+            _lblStatus.ForeColor = all ? Color.FromArgb(16, 124, 16) : Color.FromArgb(209, 52, 56);
+            AddLog(all ? "完成: " + newName : "未完成，详见上面各步结论");
+        }
+
+        /// <summary>改名后同名 exb 的位置：先按改名前那个目录找，再退到设计环境/独立目录。</summary>
+        private string ChainExbPath(string newName, string baseFolder)
+        {
+            if (string.IsNullOrEmpty(newName)) return null;
+            return FindDrawingFile(newName, baseFolder);
+        }
+
+        /// <summary>
+        /// 链里「更新工程图链接文件」这一步的目标：先走移植自 exbtracker 的实时校验
+        /// （口径升级：目标名跟**外链 ics 的文件名**，不跟元素名 —— 钣金展开配置的显示名和文件名会不一致）；
+        /// 实时选区认不出来（V2.0 改名后 CAXA 可能清空选择）才按「同名 ics/exb 还在改名前那个目录」定位。
+        /// </summary>
+        private bool TryChainChangeLinksTarget(string newName, string baseFolder,
+            out string icsPath, out string exbPath, out string folder)
+        {
+            string liveIcs, liveExb, liveFolder, liveName;
+            if (LinkRenameSync.PrepareChangeLinksTarget(_siteApp, AddLog,
+                    out liveIcs, out liveExb, out liveFolder, out liveName))
+            {
+                AddLog("cl: 按实时选区认定 ics=" + liveIcs + "；exb=" + Path.GetFileName(liveExb));
+                icsPath = liveIcs; exbPath = liveExb; folder = liveFolder;
+                return true;
+            }
+            icsPath = null; exbPath = null; folder = null;
+            if (string.IsNullOrEmpty(newName) || string.IsNullOrEmpty(baseFolder)) return false;
+            string candIcs = Path.Combine(baseFolder, newName + ".ics");
+            string candExb = FindDrawingFile(newName, baseFolder);
+            if (!File.Exists(candIcs) || candExb == null)
+            {
+                AddLog("cl: 实时选区没认出来，按新名兜底也没找到（ics 存在=" + File.Exists(candIcs) +
+                    "，exb=" + (candExb ?? "(无)") + "）");
+                return false;
+            }
+            AddLog("cl: 实时选区没认出来（改名后 CAXA 会清空选择），按 V2.0「只换文件名不换目录」兜底定位：" +
+                newName + ".ics / " + Path.GetFileName(candExb));
+            icsPath = candIcs; exbPath = candExb; folder = baseFolder;
+            return true;
+        }
+
+        /// <summary>
+        /// 链第一步「重命名v2.0」本体（同步跑在 UI 线程，单按钮与链共用同一段）。
+        /// 返回是否打出「═══ 结论（外链件…」——那行是四路回读全过之后才印的，
+        /// 准入闸拒绝、用户取消、半途中止都不会有它（铁律 3：不看返回值只看权威副作用信号）。
+        /// ★ 图号分离在 prompt 回调里做 ★：prompt 位于双闸通过之后、任何改动之前 ⇒
+        ///   属性写在还有效的选中件上，且被闸拒绝时一个字段都不写。
+        /// ★ prompt 不再弹窗（2026-11-05 用户口径）★：新名只读界面「新零件名」框，情况说明进日志；
+        ///   框为空即中止（不拿旧名兜底），链后面的破坏性步骤一律不接。
+        /// ★ 不借代点引擎 ★：改名框由 RenamePopupSentry 自己布防/撤防（坑 149 语义下答案只能是「取消」，
+        ///   交给通用代点会答成「是」）。
+        /// </summary>
+        private bool RunRenameStepV2(out string newName)
+        {
+            newName = null;
+            bool concluded = false;
+            string typed = null;
+
+            Func<string, string, string> prompt = delegate(string info, string prefill)
+            {
+                // ★ 输入弹窗已按用户口径去掉（2026-11-05）★：新名只认界面「新零件名」框，
+                //   那段「选中 / 外链源 / 将执行 ①②③④」情况说明改记日志，不再中途拦一次流程。
+                //   prefill（旧名）因此不再使用 —— 空框就是没决定好名字，绝不拿旧名当默认值。
+                foreach (string line in info.Replace("\r\n", "\n").Split('\n'))
+                {
+                    string t = line.Trim();
+                    if (t.Length > 0) AddLog("v2: " + t);
+                }
+                AddLog("v2: 旧 ics 由 V2.0 路线删除；旧 exb 改名成新名，链接指向由下一步「更新工程图链接文件」改");
+                string n = _txtNewName.Text.Trim();
+                if (n.Length == 0)
+                {
+                    AutoCloseBox.Show("重命名v2.0：界面「新零件名」框是空的。输入弹窗已去掉，" +
+                        "请先在框里填好新零件名再点按钮。", 20000);
+                    return null;
+                }
+                foreach (char c in Path.GetInvalidFileNameChars())
+                {
+                    if (n.IndexOf(c) >= 0)
+                    {
+                        AutoCloseBox.Show("新零件名包含非法字符：" + c, 20000);
+                        return null;
+                    }
+                }
+                if (_sepEnabled)
+                {
+                    Dictionary<string, string> values;
+                    string sepError;
+                    if (!TryBuildSepValues(n, out values, out sepError))
+                    {
+                        AutoCloseBox.Show(sepError, 25000);
+                        return null;
+                    }
+                    // 属性必须写在改名之前：V2.0 的 SaveAs/set_Name 之后 CAXA 可能清空选择，
+                    // 到时候再回填就找不到"第一个选中元素"了（本工程 11-02 起的老口径）。
+                    AddLog("图号分离：改名前先把 SC 属性写进选中件（按界面当前选中的分离规则）");
+                    CaxaAutomation.WriteFirstElementCustomProps(_app, values);
+                    foreach (var kv in values) AddLog("    " + kv.Key + " = " + kv.Value);
+                }
+                typed = n;
+                return n;
+            };
+
+            Diagnostics.Log("===== 重命名v2.0（外链件·反转时序）=====");
+            LinkRenameSync.Run(_siteApp, prompt, delegate(string s)
+            {
+                AddLog(s);
+                if (s != null && s.IndexOf("═══ 结论（外链件", StringComparison.Ordinal) >= 0)
+                    concluded = true;
+            });
+            newName = typed;
+            if (!concluded) return false;
+
+            // V2.0 把新外链指向写在内存里（父场景 ics 还没存）：不补这一发，关掉场景重开就回到旧指向。
+            AddLog("保存当前场景文档，把新的外链指向落盘");
+            CaxaAutomation.SaveActiveDoc(_app,
+                delegate(int waitMs) { PumpMessages(waitMs, "保存 E_FAIL，等宿主收尾消息跑完再重试"); });
+            return true;
+        }
+
+        // ================================================================ 更新3dbom
+
+        /// <summary>
+        /// 「更新3dbom」单按钮：判定前台环境 → 打开同名 exb → 派 CX_DFT_Update3DBom → 哨兵勾「更新」点确定。
+        /// ★ 图纸打开后**不关**（需求口径：明细要在图上看）；只有「重命名v2.0」联动链里才保存并关闭。
+        /// </summary>
+        private void BtnUpdate3DBom_Click(object sender, EventArgs e)
+        {
+            if (FlowGate.Busy) return;
+            if (_siteApp == null) { MessageBox.Show("尚未连接 CAXA 3D。", AppTitleBase); return; }
+            RunLongFlow("更新3dbom", delegate { Update3DBomCore(false, null); });
+        }
+
+        /// <summary>
+        /// 「更新3dbom」核心（单按钮与联动链共用）：
+        ///   ① 前台是设计环境（ics）：Prepare 认装配体并定位同名 exb（**只认路径、不打开**），
+        ///      打开动作一律交给本工程的 <see cref="EnsureDrawingOpened"/> —— 它带焐热纪律，
+        ///      直接 OpenFile2 冷启动会崩在 dataexchange.dll（坑 148），这条不许绕；
+        ///   ② 前台是图纸（exb）：plan.ExbPath=null，就作用在当前前台这张，链也不替它关（不是这一步开的）；
+        ///   ③ 布防「更新3D明细」哨兵 **在派命令之前**（框可能几百毫秒就弹，模态一弹起消息泵就归它）；
+        ///   ④ 权威完成信号 = CRX 报 commandEnded | CX_DFT_Update3DBom（模态框关掉那一刻才结束）。
+        /// </summary>
+        /// <param name="closeAfter">链专用：true = 本步为链打开的那张 exb 跑完后保存并关闭。</param>
+        /// <param name="knownExb">链专用：改名后同名 exb 已知，不必再让 Prepare 去认（null = 照单按钮口径认）。</param>
+        private void Update3DBomCore(bool closeAfter, string knownExb)
+        {
+            SinkToBottom();
+
+            Update3DBomPlan plan;
+            if (!string.IsNullOrEmpty(knownExb) && File.Exists(knownExb))
+            {
+                plan = new Update3DBomPlan
+                {
+                    Mode = "联动链指定",
+                    ExbPath = knownExb,
+                    Target = Path.GetFileName(knownExb)
+                };
+                AddLog("目标图纸由联动链直接指定：" + plan.Target + "（不再走「同名 exb 候选 + 装配体判定」）");
+            }
+            else
+            {
+                // 只解析路径（openExb=false ⇒ 不在这里碰 OpenFile2）；Prepare 自己弹的宿主框要有人点
+                using (PopupAutoYes.Borrow("更新3dbom·准备"))
+                    plan = Update3DBomFlow.Prepare(_siteApp, AddLog, PickExbForUpdate, false, false);
+            }
+            if (plan == null) throw new Exception("「更新3dbom」没得出目标图纸（准备阶段返回空）。");
+            AddLog("分支=" + plan.Mode + "，目标=" + plan.Target +
+                   (string.IsNullOrEmpty(plan.ExbPath) ? "" : "（" + plan.ExbPath + "）"));
+
+            // ★ 通道阶梯往上走一级再动手（总纲第 23 条「TLB 优先」）：先试静默的 UpdateDraftViews，
+            //   成了就整条「进图纸环境 + 派命令 + 等 commandEnded」都不用跑。
+            if (TryUpdate3DBomByApi(plan, closeAfter))
+            {
+                AddLog("明细更新由 TLB 静默通道完成，本步没打开过图纸 ⇒ 不保存、不关闭（盘上 exb 已由宿主改写）");
+                _lblStatus.Text = "更新3dbom：静默通道已执行（以图纸界面为准）";
+                _lblStatus.ForeColor = Color.FromArgb(16, 124, 16);
+                RestoreFront("更新3dbom（TLB 静默通道）结束");
+                return;
+            }
+
+            DateTime openStart = DateTime.Now;
+            int pingSeq = CrxBridge.PostCommand("CMD:PING");
+            string pingAck = "REQ.ack | seq=" + pingSeq;
+
+            if (string.IsNullOrEmpty(plan.ExbPath))
+            {
+                AddLog("1/4 前台已是图纸环境，直接对当前前台图纸执行（这张不是本步打开的，收尾不关它）");
+            }
+            else
+            {
+                AddLog("1/4 进图纸环境 " + Path.GetFileName(plan.ExbPath));
+                if (!EnsureDrawingOpened(plan.ExbPath))
+                    throw new Exception("图纸没打开，明细不更新。冷启动自动打开会在 dataexchange.dll 崩掉 CAXA，" +
+                        "请先在 CAXA 里手工打开 " + Path.GetFileName(plan.ExbPath) + " 再重跑。");
+            }
+            WaitUntil("等图纸就绪", 15000, delegate
+            {
+                if (LogCount(pingAck) == 0 && !File.Exists(CrxBridge.RequestPath))
+                    pingAck = "REQ.ack | seq=" + CrxBridge.PostCommand("CMD:PING");
+                return OpenEndedSince(openStart) && PopupAutoYes.ModalCount == 0;
+            });
+            WaitUntil("等编辑器稳定", 3000,
+                () => PopupAutoYes.ModalCount == 0 && CrxBridge.LogQuiet(200));
+            if (!CrxBridge.IsCrxLoaded())
+                throw new Exception("图纸命令桥（CRX）没就绪，派不动命令。可点「注册CRX」后重开 CAXA 再试。");
+
+            WireBomSentinel();
+            int endedBase = LogCount("commandEnded | CX_DFT_Update3DBom");
+            DlgUpdate3DBom.Arm(plan.Target);
+
+            AddLog("2/4 派发 CX_DFT_Update3DBom（「更新3D明细」由后台哨兵勾「更新」并点确定）");
+            int seq = CrxBridge.PostCommand("CMD:SENDSTR|CX_DFT_Update3DBom");
+            bool acked = WaitUntil("等 CRX 接单", 15000,
+                () => LogCount("REQ.ack | seq=" + seq) > 0, 100);
+            if (!acked)
+            {
+                DlgUpdate3DBom.Disarm();
+                throw new Exception("CRX 15 秒内没接这条请求（请求文件没被取走），已撤防哨兵。");
+            }
+
+            // 布防总时长 60 秒：哨兵要么在此之前办完那张框，要么放弃；两步都等完才判命令结束
+            bool sentinelDone = WaitUntil("等「更新3D明细」由哨兵办完", 75000,
+                () => !DlgUpdate3DBom.IsArmed || FlowGate.StopRequested, 300);
+            bool ended = WaitUntil("等 CRX 报「更新3D明细」执行完成", 60000,
+                () => LogCount("commandEnded | CX_DFT_Update3DBom") > endedBase, 300);
+            if (DlgUpdate3DBom.IsArmed) DlgUpdate3DBom.Disarm();
+
+            string sentinel = _bomSentinelResult;
+            if (string.IsNullOrEmpty(sentinel))
+                sentinel = sentinelDone ? "哨兵已收尾（没回具体结局）" : "哨兵 75 秒内没收尾";
+            AddLog("3/4 命令结束=" + (ended ? "✔ CRX 已确认" : "✘ 60 秒内没等到 commandEnded") +
+                "；哨兵结局：" + sentinel);
+
+            if (FlowGate.StopRequested) throw new OperationStoppedException();
+            if (!ended)
+                throw new Exception("「更新3D明细」没等到 CRX 的 commandEnded —— 那张对话框多半还开着，" +
+                    "本步不保存、不关图，请人工处理后再跑（哨兵结局：" + sentinel + "）");
+
+            if (closeAfter && !string.IsNullOrEmpty(plan.ExbPath))
+            {
+                string fileName = Path.GetFileName(plan.ExbPath);
+                AddLog("4/4 联动链收尾：保存并关闭这张图纸 " + fileName);
+                bool closed = CloseDrawingByName(fileName);
+                AddLog(closed ? "    工程图已保存并关闭" : "    工程图未确认关闭，请人工检查这张图纸");
+                WaitUntil("等回到设计环境", 10000, () => CaxaAutomation.IsActiveSceneDocument(_app));
+            }
+            else
+            {
+                AddLog(closeAfter
+                    ? "4/4 本步没有为链打开图纸（前台本就是图纸）⇒ 按铁律不关别人的窗口"
+                    : "4/4 单按钮口径：图纸保持打开，明细就在图上看（不保存、不关闭）");
+            }
+            RestoreFront("更新3dbom 流程结束");
+        }
+
+        /// <summary>
+        /// 把「更新3D明细」哨兵的结局回调挂到状态行。
+        /// TLB 静默通道与命令派发通道共用同一份口径，所以只留这一处（三态而不是两态：
+        /// 自己勾了点了 = 绿；勾不上 / 60 秒没弹 = 红；框被别人关了没人代点 = 黄，结果不由本工具负责）。
+        /// ★ 回调在**哨兵后台线程**触发 ⇒ 改控件只能 <c>BeginInvoke</c>，同步 <c>Invoke</c> 会和
+        ///   UI 线程互相等（坑 197）。
+        /// </summary>
+        private void WireBomSentinel()
+        {
+            _bomSentinelResult = null;
+            DlgUpdate3DBom.Finished = delegate(string m)
+            {
+                _bomSentinelResult = m;
+                try
+                {
+                    if (IsDisposed) return;
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        string s = m ?? "";
+                        Color c;
+                        if (s.StartsWith("已勾", StringComparison.Ordinal))
+                            c = Color.FromArgb(16, 124, 16);
+                        else if (s.StartsWith("没能勾上", StringComparison.Ordinal) ||
+                                 s.StartsWith("等 ", StringComparison.Ordinal))
+                            c = Color.FromArgb(209, 52, 56);
+                        else
+                            c = Color.FromArgb(190, 110, 0);
+                        _lblStatus.Text = "更新3dbom：" + s;
+                        _lblStatus.ForeColor = c;
+                    });
+                }
+                catch { }
+            };
+        }
+
+        /// <summary>
+        /// ★ 通道阶梯第 2 级（总纲第 23 条「TLB 优先」）：类型库派发
+        ///   <c>IZBaseApp::UpdateDraftViews(exbPath, VARIANT_TRUE)</c>（memid 72 / oVft 648 / 槽 81；
+        ///   v26 interop **没有**这个成员，所以只能 <c>LoadTypeLibEx(REGKIND_NONE)</c> +
+        ///   <c>ITypeInfo::Invoke</c>，实现见 <see cref="Update3DBomApi"/>）。
+        ///   第二个参数 TRUE = 同时更新 BOM。exbtracker 11-04 19:44:47 实测：目标 exb **未打开**时
+        ///   静默改写盘上 exb，全程不进图纸环境、不派命令、不点界面。
+        ///
+        /// ★ 为什么「打开图纸 + 派发 CX_DFT_Update3DBom」这条还留着（不是没试 TLB，是 TLB 有已知缺口）：
+        ///   1) 这条**不恒静默**：目标 exb 已是前台那张时会弹「更新3D明细」（同项目 19:45:28），
+        ///      所以先布防哨兵再调用，弹了就由哨兵勾「更新」点「确定」；办不完就不算成、回落派发；
+        ///   2) **联动链不走这条**（<paramref name="closeAfter"/>=true）：链里这张 exb 刚被
+        ///      <c>File.Move</c> 换过名、盘上链接状态取决于上一步「更新工程图链接文件」有没有落盘，
+        ///      让静默通道去改写一张链接未证的图 = 拿没验过的组合赌链的结论 ⇒ 链照走已实机定案的派发口径；
+        ///   3) 成功判据仍是"宿主返回 S_OK + 模态框已办完"，与 CRX 那条一样属**投递层**信号：
+        ///      明细到底变没变，仍以图纸界面为准（四条轴里"语义正确"这一条还没在实机证完）。
+        /// </summary>
+        /// <returns>true = 这条已把明细更新办完，调用方直接收工；false = 没成/不适用，回落到命令派发。</returns>
+        private bool TryUpdate3DBomByApi(Update3DBomPlan plan, bool closeAfter)
+        {
+            const string tag = "TLB 静默通道：";
+
+            if (closeAfter)
+            {
+                AddLog(tag + "联动链里跳过（exb 刚改名搬过、盘上链接未证）⇒ 走「打开图纸 + 派发命令」那条");
+                return false;
+            }
+            if (plan == null || string.IsNullOrEmpty(plan.ExbPath))
+            {
+                AddLog(tag + "跳过：这条只认 exb 的绝对路径，前台已是图纸环境时准备阶段不给路径");
+                return false;
+            }
+            if (_siteApp == null)
+            {
+                AddLog(tag + "跳过：没拿到 CAXA 站点对象（IZBaseApp）");
+                return false;
+            }
+            if (!File.Exists(plan.ExbPath))
+            {
+                AddLog(tag + "跳过：目标 exb 不在盘上（" + plan.ExbPath + "）");
+                return false;
+            }
+
+            WireBomSentinel();
+            // ★ 先布防，再调用 —— 这条会弹框，弹了就没人点等于这一轮白跑
+            DlgUpdate3DBom.Arm(plan.Target);
+
+            Update3DBomApi.CallResult r;
+            bool popped = false;
+            string watch = "";
+            try
+            {
+                AddLog("试 TLB 静默通道 UpdateDraftViews(" + Path.GetFileName(plan.ExbPath) +
+                       ", TRUE)（走通则下面 1/4~3/4 全免）");
+                r = Update3DBomApi.InvokeUpdateDraftViews(_siteApp, plan.ExbPath, true, AddLog);
+                popped = DlgUpdate3DBom.WatchDialog(2500, out watch);
+            }
+            finally
+            {
+                // 没弹框就撤防，免得下次误接管别人的框；弹过则交给哨兵自己收尾（它有 60 秒硬时限）
+                if (!popped) DlgUpdate3DBom.Disarm();
+            }
+
+            AddLog("    " + Update3DBomApi.Describe(r));
+            AddLog("    " + watch);
+
+            if (!r.Ok)
+            {
+                AddLog(tag + "没成（" + Update3DBomApi.Describe(r) + "）⇒ 回落到「焐热打开图纸 + 派发 CX_DFT_Update3DBom」");
+                return false;
+            }
+            string sentinel = _bomSentinelResult;
+            if (popped && (sentinel == null ||
+                !sentinel.StartsWith("已勾", StringComparison.Ordinal)))
+            {
+                AddLog(tag + "宿主返回 S_OK，但「更新3D明细」没由哨兵办完（结局：" +
+                      (sentinel ?? "哨兵没回话") + "）⇒ 不能算成，回落派发");
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>Prepare 认不出同名 exb 时请用户指定（文件框以本窗为 owner，必须先索回前台才看得见）。</summary>
+        private string PickExbForUpdate(string suggested)
+        {
+            bool wasBehind = _behind;
+            if (wasBehind) RestoreFront("需用户选择图纸");
+            try
+            {
+                using (var ofd = new OpenFileDialog())
+                {
+                    ofd.Title = "选择要更新 3D 明细的图纸（.exb）";
+                    ofd.Filter = "CAXA 图纸 (*.exb)|*.exb|所有文件 (*.*)|*.*";
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(suggested))
+                        {
+                            string dir = Path.GetDirectoryName(suggested);
+                            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir)) ofd.InitialDirectory = dir;
+                            ofd.FileName = Path.GetFileName(suggested);
+                        }
+                    }
+                    catch { }
+                    PopupAutoYes.FileDialogTarget = null;   // 这是给人挑 exb 的框，不许代点填路径
+                    return ofd.ShowDialog(this) == DialogResult.OK ? ofd.FileName : null;
+                }
+            }
+            finally
+            {
+                if (wasBehind) SinkToBottom();
+            }
+        }
+
+        // ================================================================ 让位（不遮挡宿主原生对话框）
+
+        /// <summary>
+        /// 让工具窗退到 Z 序最底，且**不抢焦点**。两步都不可省：
+        ///   ① 先摘 WS_EX_TOPMOST（Form.TopMost=false）—— 置顶窗即使 HWND_BOTTOM 也只是在"置顶带"里沉底；
+        ///   ② 再 SetWindowPos(HWND_BOTTOM, SWP_NOACTIVATE) 沉到普通窗口区的底。
+        /// 用户原本的置顶意图记在 _behindTopMost，流程结束原样恢复。
+        /// </summary>
+        private void SinkToBottom()
+        {
+            if (_behind) return;
+            _behind = true;
+            _behindTopMost = TopMost;
+            _behindTick = Environment.TickCount;
+            try
+            {
+                if (TopMost) TopMost = false;
+                SetWindowPos(Handle, HWND_BOTTOM, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                Diagnostics.Log("ui: 工具窗已摘置顶并沉到 Z 序底（流程期不遮挡宿主对话框）");
+            }
+            catch (Exception ex) { Diagnostics.Log("ui: 沉底失败 " + ex.Message); }
+        }
+
+        /// <summary>索回前台：恢复用户设定的置顶状态并把窗口提回来。幂等，失败/超时/收尾都可调。</summary>
+        private void RestoreFront(string why)
+        {
+            if (!_behind) return;
+            _behind = false;
+            try
+            {
+                if (!IsDisposed && !Disposing)
+                {
+                    if (_behindTopMost) TopMost = true;
+                    SetWindowPos(Handle, HWND_TOP, 0, 0, 0, 0,
+                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                    BringToFront();
+                    Activate();
+                }
+                Diagnostics.Log("ui: 流程结束（" + why + "），工具窗已索回前台" +
+                                (_behindTopMost ? "（并恢复置顶）" : ""));
+            }
+            catch (Exception ex) { Diagnostics.Log("ui: 索回前台失败 " + ex.Message); }
+        }
+
+        /// <summary>看门狗（800 ms 一次）：让位超时或流程已彻底结束就索回，绝不把窗口永久留在后面看不见。</summary>
+        private void RestoreIfOverdue()
+        {
+            if (!_behind) return;
+            bool overdue = unchecked(Environment.TickCount - _behindTick) > BehindMaxMs;
+            bool idle = !FlowGate.Busy && !DlgUpdate3DBom.IsArmed;
+            if (overdue || idle) RestoreFront(overdue ? "让位超时看门狗" : "流程已结束");
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+            int x, int y, int cx, int cy, uint flags);
+
+        private static readonly IntPtr HWND_TOP = IntPtr.Zero;
+        private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
+        private const uint SWP_NOSIZE = 0x0001;
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOACTIVATE = 0x0010;
+
         // ================================================================ 独立功能：钣金件 / 工程图标题栏
 
-        /// <summary>长流程公共外壳：锁定按钮、开启代点、统一收尾、三支提示（已停止/失败/完成）。</summary>
+        /// <summary>长流程公共外壳：锁定按钮、借用代点引擎（租约）、统一收尾、三支提示（已停止/失败/完成）。</summary>
         private void RunLongFlow(string flowName, Action body)
         {
             if (!FlowGate.TryAcquire(AppTitleBase, flowName))
@@ -1873,8 +2499,11 @@ namespace caxa3dcodenameextraction
             _btnSheetSize.Enabled = false;
             _btnWarmUp.Enabled = false;
             _btnRegen.Enabled = false;
+            _btnUpdate3DBom.Enabled = false;
             _btnStop.Enabled = true;
-            PopupAutoYes.Enabled = true;
+            // 代点引擎是「租」来的：本流程借一笔，finally 必还。最后一笔归还时才关引擎，
+            // 并在归还后按 tailMs 巡检迟到的业务框（原 WatchLatePopups 的职责并入这里）。
+            IDisposable popupLease = PopupAutoYes.Borrow(flowName, 30000);
             Cursor = Cursors.WaitCursor;
             AddLog("");
             AddLog("========== " + flowName + " 开始 ==========");
@@ -1890,21 +2519,18 @@ namespace caxa3dcodenameextraction
             }
             finally
             {
-                PopupAutoYes.Enabled = false;
                 PopupAutoYes.FileDialogTarget = null;
                 PopupAutoYes.Suspend = false;
                 // 点「停止」只中断主线程，探针状态机跑在代点线程上、还在往「打开」里填路径：
                 // 实机 09:11 停止后它继续跑到 09:11:50，残留的 FileDialogTarget 把冷启动期
                 // 一张无关「打开」框填成了我们的 ics 路径。收尾一律解除武装。
-                // End() 会清空缓冲：正常走完主流程已在 3/4 处播过，这里只会捞到"中止前剩下的尾巴"。
-                // 逐行反馈现在由 ChangeLinksProbe.Log 实时并进主日志（11-02 用户口径），
-                // 这里只负责解除武装、不再回放 —— 回放正是 v6 前"同一段话打两遍"的成因。
                 ChangeLinksProbe.End();
-                // 代点开关关掉不等于没框要处理：原生替换的插入例程常在我们判出成功、释放独占之后
-                // 才弹「选择用于外部链接的零件或装配」「链接的配置」「重新附加约束」，没人代点就一直
-                // 模态挂着 —— 实机 17:11:58 那轮整台 CAXA 连本插件窗口一起点不动 2 分 21 秒。
-                // 再盯 30 秒，且只认这几张业务框（本插件自己的提示框、用户自己开的框一概不碰）。
-                PopupAutoYes.WatchLatePopups(30000, flowName + " 收尾");
+                // 还租约必须放在解除武装之后：代点开关关掉不等于没框要处理——原生替换的插入例程
+                // 常在我们判出成功、释放独占之后才弹「选择用于外部链接的零件或装配」「链接的配置」
+                // 「重新附加约束」，没人代点就一直模态挂着（实机 17:11:58 整台 CAXA 点不动 2 分 21 秒）。
+                // Dispose 归零时引擎关闭，并保留 30 秒的迟到框巡检，且只认这几张业务框
+                //（本插件自己的提示框、用户自己开的框一概不碰）。
+                popupLease.Dispose();
                 // 中止/失败时把预热那张空图纸收掉：它是本插件自己的道具，留着只会多一个干扰窗口
                 //（正常走完由 CloseWarmDoc 在目标 exb 打开后撤，见 EnsureDrawingOpened）。
                 if (stopped || error != null) DiscardWarmDoc(flowName);
@@ -2077,37 +2703,43 @@ namespace caxa3dcodenameextraction
                 return;
             }
 
-            RunLongFlow("钣金件设计环境设默认", delegate
+            RunLongFlow("钣金件设计环境设默认", delegate { SheetMetalDefaultCore(); });
+        }
+
+        /// <summary>
+        /// 「钣金件设计环境设默认」的真实动作（不带前置校验、不带 RunLongFlow 壳）：
+        /// 独立按钮和「重命名v2.0」联动链（type=20 那条）共用这一份，口径不会分叉。
+        /// </summary>
+        private void SheetMetalDefaultCore()
+        {
+            SheetMetalOps.NameUpdateOptions opt = new SheetMetalOps.NameUpdateOptions();
+            opt.OpenDrawingFirst = false;
+            opt.SaveIcs = true;
+            opt.CloseIcs = true;
+            opt.SaveAndCloseDrawing = false;
+            opt.UpdateTitleBlock = false;
+            opt.WaitCondition = delegate(string what, int timeoutMs, Func<bool> cond)
             {
-                SheetMetalOps.NameUpdateOptions opt = new SheetMetalOps.NameUpdateOptions();
-                opt.OpenDrawingFirst = false;
-                opt.SaveIcs = true;
-                opt.CloseIcs = true;
-                opt.SaveAndCloseDrawing = false;
-                opt.UpdateTitleBlock = false;
-                opt.WaitCondition = delegate(string what, int timeoutMs, Func<bool> cond)
-                {
-                    return WaitUntil(what, timeoutMs, cond);
-                };
+                return WaitUntil(what, timeoutMs, cond);
+            };
 
-                SheetMetalOps.SheetMetalProbeResult r = SheetMetalOps.RunSheetMetalProbeInLinkedDoc(
-                    _app, true, true, AddLog, delegate { return FlowGate.StopRequested; }, PumpMessages, opt);
+            SheetMetalOps.SheetMetalProbeResult r = SheetMetalOps.RunSheetMetalProbeInLinkedDoc(
+                _app, true, true, AddLog, delegate { return FlowGate.StopRequested; }, PumpMessages, opt);
 
-                AddLog("");
-                AddLog("---------- 执行结果 ----------");
-                AddLog("链接文档        : " + r.TargetDocName);
-                AddLog("链接文档中钣金件: " + (string.IsNullOrEmpty(r.FoundSheetMetalName)
-                    ? "（未找到）" : r.FoundSheetMetalName));
-                AddLog("展开件名        : " + r.AfterFlatPartName);
-                AddLog("改名            : " + (r.NameChanged ? "成功" : "未成功"));
-                AddLog(".ics 保存       : " + (r.IcsSaved ? "成功" : "失败/未执行") + " " + r.IcsSaveHr);
-                AddLog(".ics 关闭       : " + (r.IcsClosed ? "已关闭" : "未关闭") + " " + r.IcsCloseHr);
-                foreach (string note in r.Notes) AddLog("注意: " + note);
+            AddLog("");
+            AddLog("---------- 执行结果 ----------");
+            AddLog("链接文档        : " + r.TargetDocName);
+            AddLog("链接文档中钣金件: " + (string.IsNullOrEmpty(r.FoundSheetMetalName)
+                ? "（未找到）" : r.FoundSheetMetalName));
+            AddLog("展开件名        : " + r.AfterFlatPartName);
+            AddLog("改名            : " + (r.NameChanged ? "成功" : "未成功"));
+            AddLog(".ics 保存       : " + (r.IcsSaved ? "成功" : "失败/未执行") + " " + r.IcsSaveHr);
+            AddLog(".ics 关闭       : " + (r.IcsClosed ? "已关闭" : "未关闭") + " " + r.IcsCloseHr);
+            foreach (string note in r.Notes) AddLog("注意: " + note);
 
-                if (FlowGate.StopRequested) throw new OperationStoppedException();
-                if (!r.NameChanged)
-                    throw new Exception(r.Notes.Count > 0 ? r.Notes[0] : "展开件名未发生改变，详见日志。");
-            });
+            if (FlowGate.StopRequested) throw new OperationStoppedException();
+            if (!r.NameChanged)
+                throw new Exception(r.Notes.Count > 0 ? r.Notes[0] : "展开件名未发生改变，详见日志。");
         }
 
         /// <summary>工程图标题栏设默认：打开同名 exb → 派发 CX_DFT_TITLEBLOCK_3DSET → 保存并关闭。</summary>
@@ -2543,7 +3175,7 @@ namespace caxa3dcodenameextraction
             _txtLog.ScrollToCaret();
         }
         /// <summary>
-        /// 供后台线程实时写日志区：**只 BeginInvoke，绝不同步等**。
+        /// 界面日志区的唯一入口（`Diagnostics.UiLogSink`）：**只 BeginInvoke，绝不同步等**。
         /// 代点线程同步 Invoke 时若主线程正好卡在 CAXA 不泵消息的原生调用里，两边互等 ——
         /// 对话框没人填、主线程白等 600 秒。宁可丢一行也不能卡住。
         /// </summary>

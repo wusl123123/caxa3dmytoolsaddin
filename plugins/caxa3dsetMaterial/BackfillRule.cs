@@ -21,7 +21,7 @@ namespace caxa3dsetMaterial
 
         /// <summary>文件缺失且无播种文件时使用的最小模板（与项目内规则文件一致）。</summary>
         private const string DefaultText =
-            "#规则说明,抓取\"\"之间的字段#\r\n" +
+            "#规则说明,抓取\"\"之间的字段将材料名称回填到对应字段#\r\n" +
             "\"材料\"\r\n" +
             "\"SC材料\"\r\n";
 
@@ -121,9 +121,11 @@ namespace caxa3dsetMaterial
                 _loadedPath = path;
                 _stamp = stamp;
                 _error = null;
-                Diagnostics.Trace("回填规则已加载（" + fields.Count + " 个字段）：" + string.Join("、", fields.ToArray()));
+                Diagnostics.Trace("回填规则已加载（" + fields.Count + " 个字段，读的是 " + path + "）：" +
+                                  string.Join("、", fields.ToArray()));
                 if (fields.Count == 0)
                     Diagnostics.Log("回填规则为空（" + path + "）：按规则不兜底，不写任何自定义属性。");
+                else WarnIfSeedDiffers(path);
             }
             catch (Exception ex)
             {
@@ -136,6 +138,35 @@ namespace caxa3dsetMaterial
             if (_error != ex.Message) Diagnostics.Log("读取回填规则失败：" + ex.Message);
             _fields = new List<string>();
             _error = ex.Message;
+        }
+
+        /// <summary>
+        /// 程序目录那份只是首次播种用的模板，之后插件只认运行期这一份；两边不一致时提示一句，
+        /// 免得改了模板以为已生效（本项目的运行期文件在 %APPDATA%\caxa3dsetMaterial\）。
+        /// </summary>
+        private static void WarnIfSeedDiffers(string runtimePath)
+        {
+            try
+            {
+                string seed = SeedPath();
+                if (seed == null || string.Equals(seed, runtimePath, StringComparison.OrdinalIgnoreCase)) return;
+
+                byte[] a = File.ReadAllBytes(runtimePath);
+                byte[] b = File.ReadAllBytes(seed);
+                if (a.Length == b.Length)
+                {
+                    bool same = true;
+                    for (int i = 0; i < a.Length; i++)
+                    {
+                        if (a[i] != b[i]) { same = false; break; }
+                    }
+                    if (same) return;
+                }
+
+                Diagnostics.Log("注意：程序目录的规则模板与运行期文件内容不一致，生效的是运行期那份（" +
+                                runtimePath + "）；改模板不会生效。");
+            }
+            catch { }
         }
 
         /// <summary>解析：跳过空行与 # 开头的整行注释，取每个双引号内的非空文本。</summary>

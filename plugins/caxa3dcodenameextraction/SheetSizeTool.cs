@@ -461,9 +461,10 @@ namespace caxa3dcodenameextraction
 
         // ================================================================ 自定义属性
 
+        // 共享表铁律（规则 14.7/14.9）：只认 IsSharedMgr()==true 的管理器；三个候选都没确认
+        // 就返回 null 让调用方判失败——绝不把零件级表当兜底，也不按属性名猜表。
         private static IZCustomPropMgr GetSharedPropMgr(IZElement elem)
         {
-            IZCustomPropMgr firstFallback = null;
             foreach (int selector in new int[] { 0, 1 })
             {
                 IZCustomPropMgr mgr = null;
@@ -472,17 +473,23 @@ namespace caxa3dcodenameextraction
                 bool shared = false;
                 try { shared = mgr.IsSharedMgr(); } catch { }
                 if (shared) return mgr;
-                if (firstFallback == null) firstFallback = mgr;
             }
 
             try
             {
                 IZCustomPropMgr prop = elem.get_CustomPropMgr(true) as IZCustomPropMgr;
-                if (prop != null) return prop;
+                if (prop != null)
+                {
+                    bool confirmed = false;
+                    try { confirmed = prop.IsSharedMgr(); } catch { }
+                    if (confirmed) return prop;
+                }
             }
             catch (Exception ex) { Diagnostics.Log("get_CustomPropMgr 失败：" + ex.Message); }
 
-            return firstFallback;
+            Diagnostics.Log("GetSharedPropMgr: 三个候选都没有 IsSharedMgr=true，" +
+                "按共享表铁律本次不读写任何其它表");
+            return null;
         }
 
         private static string ReadCustomProp(IZElement elem, string name)

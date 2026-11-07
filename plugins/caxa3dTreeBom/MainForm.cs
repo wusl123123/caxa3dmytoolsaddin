@@ -36,6 +36,13 @@ namespace caxa3dTreeBom
         private string _currentElemName = "";
         private string _tablePath = "";
         private List<string> _headers = new List<string>();
+
+        /// <summary>本轮抓取/回读后每个表头列的「主要取值来源」（属性 / BOM:标签 / 专用:词 / 空＝读不到），
+        /// 由 ReportColumnSources 从 BomBuilder 汇总；列头 ToolTip 与日志汇总行都用它。</summary>
+        private Dictionary<string, string> _colSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>映射文件的生效说明只在第一次取数时播报一次（避免每次抓取都刷一行同内容）。</summary>
+        private bool _mapDescribed;
         private List<BomRow> _rows = new List<BomRow>();
         private int _thumbCol = -1;
         private bool _loading;
@@ -122,6 +129,13 @@ namespace caxa3dTreeBom
 
         private int _menuRow = -1;
         private int _menuCol = -1;
+
+        // ↓↓↓ 键盘归属抢救：Ctrl+C/V/X/A/Z 归本窗口自己的文本框（机理/开关/取证见 Caxa3dMyTools.Contracts.ChordRescue）
+        protected override void OnActivated(EventArgs e) { base.OnActivated(e); Caxa3dMyTools.Contracts.ChordRescue.Install(this, msg => Diagnostics.Trace(msg)); }
+        protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口失活"); }
+        protected override void OnFormClosed(FormClosedEventArgs e) { base.OnFormClosed(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口关闭"); }
+        protected override void WndProc(ref Message m) { if (Caxa3dMyTools.Contracts.ChordRescue.Route(this, ref m)) return; base.WndProc(ref m); }
+        // ↑↑↑
 
         public MainForm(IZBaseApp app)
         {
@@ -645,6 +659,7 @@ namespace caxa3dTreeBom
                 };
                 int cnt = reader.RefreshProperties(rows);
                 DisplayTableData();
+                ReportColumnSources(reader, rows);
                 AddLog("🔢 已补读合并属性并重算总数量：" + cnt + " 行。");
             });
         }
@@ -962,6 +977,9 @@ namespace caxa3dTreeBom
                 }
 
                 dgvTable.RowTemplate.Height = 46;
+                // 取值来源呈现：Rows.Clear()/Add() 会连 ToolTipText 一起丢，所以每次重建表格后必须重放这两句。
+                ColumnSourceUi.ApplyCellTooltips(dgvTable, _headers, _rows);
+                ColumnSourceUi.ApplyColumnTooltips(dgvTable, _headers, _colSources);
                 dgvTable.Invalidate();
                 lblTableFile.Text = _rows.Count == 0
                     ? ("表格文件: " + _tablePath + "（暂无数据，请点击\"生成BOM\"）")
@@ -1012,6 +1030,39 @@ namespace caxa3dTreeBom
                 default:
                     string v;
                     return row.Properties.TryGetValue(h, out v) ? (v ?? "") : "";
+            }
+        }
+
+        /// <summary>
+        /// 抓取／回读完成后的「取值来源」收口：① 首次播报映射文件生效路径与条数；② 汇总列级主要来源；
+        /// ③ 写一行带分母的日志（UI ＋ %TEMP% trace 双写，只进 UI 不算取证）；④ 补列头 ToolTip。
+        /// 只统计参与属性抓取的列（层级/是否有工程图/缩略图/数量/总数量 走专用通道，不计入三通道）。
+        /// </summary>
+        private void ReportColumnSources(BomBuilder builder, List<BomRow> rows)
+        {
+            try
+            {
+                if (!_mapDescribed)
+                {
+                    _mapDescribed = true;
+                    string note = HeaderBomMap.InitAndDescribe();
+                    if (!string.IsNullOrEmpty(note)) AddLog("🧭 " + note);
+                }
+
+                _colSources = builder != null
+                    ? builder.SummarizeSources(rows)
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                string summary = ColumnSourceUi.BuildSummary(_headers, _colSources, null,
+                    rows == null ? 0 : rows.Count);
+                AddLog("🧭 " + summary);
+                Diagnostics.Trace("来源汇总：" + summary);
+                ColumnSourceUi.ApplyColumnTooltips(dgvTable, _headers, _colSources);
+            }
+            catch (Exception ex)
+            {
+                AddLog("⚠️ 取值来源汇总失败（不影响表格数据）：" + ex.Message);
+                Diagnostics.Trace("ReportColumnSources EX: " + ex.Message);
             }
         }
 
@@ -1212,6 +1263,7 @@ namespace caxa3dTreeBom
                 _rows = rows;
                 ClearThumbs();
                 DisplayTableData();
+                ReportColumnSources(builder, rows);
                 if (!cancelled && rows.Count > 0)
                     AddLog("✅ 树形BOM已生成：" + rows.Count + " 行（层级编码 1 / 1.1 / 1.1.1 …）。");
             });
@@ -1247,6 +1299,7 @@ namespace caxa3dTreeBom
 
                 int cnt = reader.RefreshProperties(rows);
                 DisplayTableData();
+                ReportColumnSources(reader, rows);
                 AddLog("✅ 属性读取完成：共处理 " + cnt + " 行。");
             });
         }
@@ -1611,28 +1664,45 @@ namespace caxa3dTreeBom
 
         private string AskText(string title, string prompt, string defaultValue)
         {
-            using (var form = new Form
+            // 必须用命名窗口：内联 `new Form { ... }` 没法 override WndProc / OnActivated，
+            // Ctrl+C/V/X/A/Z 就进不了本窗口的键盘归属抢救通道（宿主加速键表在派发前吞键，
+            // ProcessCmdKey / KeyPreview 结构性不触发）。
+            using (var form = new AskTextForm(title, prompt, defaultValue))
             {
-                Text = title,
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                ClientSize = new Size(340, 130),
-                Font = new Font("Microsoft YaHei", 9F)
-            })
+                return form.ShowDialog(this) == DialogResult.OK ? form.Input.Text : null;
+            }
+        }
+
+        /// <summary>AskText 的命名输入窗口，带 ChordRescue 四件套接线。</summary>
+        private sealed class AskTextForm : Form
+        {
+            public readonly TextBox Input;
+
+            public AskTextForm(string title, string prompt, string defaultValue)
             {
+                Text = title;
+                StartPosition = FormStartPosition.CenterParent;
+                FormBorderStyle = FormBorderStyle.FixedDialog;
+                MaximizeBox = false;
+                MinimizeBox = false;
+                ClientSize = new Size(340, 130);
+                Font = new Font("Microsoft YaHei", 9F);
+
                 var lbl = new Label { Text = prompt, Location = new Point(18, 22), AutoSize = true };
-                var txt = new TextBox { Location = new Point(18, 48), Size = new Size(300, 26), Text = defaultValue ?? "" };
+                Input = new TextBox { Location = new Point(18, 48), Size = new Size(300, 26), Text = defaultValue ?? "" };
                 var ok = new Button { Text = "确定", Location = new Point(140, 88), Size = new Size(85, 30), DialogResult = DialogResult.OK };
                 var cancel = new Button { Text = "取消", Location = new Point(233, 88), Size = new Size(85, 30), DialogResult = DialogResult.Cancel };
 
-                form.Controls.AddRange(new Control[] { lbl, txt, ok, cancel });
-                form.AcceptButton = ok;
-                form.CancelButton = cancel;
-
-                return form.ShowDialog(this) == DialogResult.OK ? txt.Text : null;
+                Controls.AddRange(new Control[] { lbl, Input, ok, cancel });
+                AcceptButton = ok;
+                CancelButton = cancel;
             }
+
+            protected override void OnActivated(EventArgs e) { base.OnActivated(e); Caxa3dMyTools.Contracts.ChordRescue.Install(this, msg => Diagnostics.Trace(msg)); }
+            protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口失活"); }
+            protected override void OnFormClosed(FormClosedEventArgs e) { base.OnFormClosed(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口关闭"); }
+            protected override void WndProc(ref Message m) { if (Caxa3dMyTools.Contracts.ChordRescue.Route(this, ref m)) return; base.WndProc(ref m); }
+            // ↑↑↑
         }
 
         private void DeleteColumn()

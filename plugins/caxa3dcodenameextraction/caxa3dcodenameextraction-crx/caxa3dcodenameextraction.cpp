@@ -27,7 +27,8 @@
 //                                     该文件名的图纸视图子窗口；fileName 必填，
 //                                     一个都没匹配上就一个都不关（回 CLOSEDOC.name-mismatch）
 //        CMD:CLOSERAW|<fileName>      与 CLOSEDOC 同一套窗口匹配，但**不存盘**：只投 WM_CLOSE
-//                                     （图纸环境预热用的载体图纸没动过，用户要求不保存直接关）
+//                                     （图纸环境预热用的载体图纸没动过，用户要求不保存直接关）；
+//                                     fileName 必填，匹配/拒绝规则与 CLOSEDOC 一致
 //        CMD:CLOSE                    crxedCommand 直调 CX_DFT_ViewClose
 //        CMD:SAVE                     crxedCommand 直调 CX_save（等待内层 CX_DFT_ViewSave）
 //        CMD:EXEC|<命令名>            按命令名直调（实测用）
@@ -978,6 +979,10 @@ static void ProbeCommandTable()
     //   CX_DFT_View_Zoom_All / CX_DFT_ViewUpdate —— 图纸环境里能由 UI 正常触发的命令（对照）
     //   CX_DFT_TITLEBLOCK_3DSET                  —— 本次目标
     //   CX_save / CX_open_Impl                   —— 已知在 Commands.xml 里但（兄弟工程实证）不可直调
+    //   CX_DFT_ChangeLinks / EditLinks           —— 「改变链接文件」（功能区「三维接口→注释」）：
+    //       名字出自 CAXADraft\Config\zh-CN\{ICIntegrate,Mechanical}\Mdl3DIOCmd.xml（2024/2027 同名，
+    //       CMDPRIORITY_MODAL，CLSID {4BF2824F-2C96-4DB1-82B3-22D17D2913CF} = App3DIO.dll 的
+    //       CxChangeLinks coclass）；EditLinks 是 Mdl3DIOUI.xml <Ins> 里的键入别名。
     const wchar_t* names[] =
     {
         L"CX_DFT_TITLEBLOCK_3DSET",
@@ -987,12 +992,10 @@ static void ProbeCommandTable()
         L"CX_save",
         L"CX_save_Impl",
         L"CX_open_Impl",
-        // 「改变链接文件」的派发名（2024/2027 配置逐字相同；EditLinks 是键入别名）——
-        // ChangeLinksProbe 靠 CMD:SENDSTR 投它，这里登记是为了 CMDPROBE 能对着它取证
-        L"CX_DFT_ChangeLinks",
-        L"EditLinks",
         L"设置3D信息",
         L"3DSET",
+        L"CX_DFT_ChangeLinks",
+        L"EditLinks",
     };
     const int n = (int)(sizeof(names) / sizeof(names[0]));
 

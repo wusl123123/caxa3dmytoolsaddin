@@ -29,6 +29,14 @@ namespace caxa3dminitool
         private Timer _selTimer;
         private const string BaseTitle = "CAXA3D小工具合集";
 
+        /// <summary>
+        /// 本插件所有提示框的标题。PopupAutoYes 按它让路，绝不自家代点自家的确认框。
+        /// </summary>
+        internal const string AppTitleBase = BaseTitle;
+
+        // ---- 零件置换（UI 代点驱动原生「替换零件/装配」，长流程）----
+        private Button _btnStop;
+
         // ---- 工具表格 ----
         private DataGridView _grid;
         private readonly Dictionary<int, ToolEntry> _cellTools = new Dictionary<int, ToolEntry>();
@@ -82,6 +90,12 @@ namespace caxa3dminitool
         private bool _kernelStopRequested;
         private bool _kernelRunning;
 
+        // ↓↓↓ 键盘归属抢救：Ctrl+C/V/X/A/Z 归本窗口自己的文本框（机理/开关/取证见 Caxa3dMyTools.Contracts.ChordRescue）
+        protected override void OnActivated(EventArgs e) { base.OnActivated(e); Caxa3dMyTools.Contracts.ChordRescue.Install(this, msg => Diagnostics.Trace(msg)); }
+        protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口失活"); }
+        protected override void WndProc(ref Message m) { if (Caxa3dMyTools.Contracts.ChordRescue.Route(this, ref m)) return; base.WndProc(ref m); }
+        // ↑↑↑
+
         public MiniToolsForm(IZBaseApp app)
         {
             _app = app;
@@ -129,10 +143,24 @@ namespace caxa3dminitool
             _btnTopMost.Click += (s, e) => ToggleTopMost();
             top.Controls.Add(_btnTopMost);
 
+            // 「停止」只在长流程期间可用（铁律 6：长等待链必须有停止入口）。
+            _btnStop = new Button
+            {
+                Text = "停止",
+                Left = 120, Top = 12, Width = 90, Height = 30,
+                BackColor = Color.FromArgb(200, 60, 60), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
+                Enabled = false
+            };
+            _btnStop.FlatAppearance.BorderSize = 0;
+            _btnStop.Click += (s, e) => StopFlow();
+            top.Controls.Add(_btnStop);
+
             _lblSelection = new Label
             {
                 Text = "当前选中：读取中…",
-                Left = 120, Top = 8, Width = 900, Height = 44,
+                Left = 225, Top = 8, Width = 790, Height = 44,
                 AutoSize = false,
                 AutoEllipsis = true,
                 Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
@@ -273,7 +301,9 @@ namespace caxa3dminitool
                 {
                     new ToolEntry { Title = "选中取消压缩", Tip = "按装配体穿透规则抓零部件，逐个解除压缩并回读确认", Run = UnsuppressSelectedElements },
                     new ToolEntry { Title = "更新包围盒", Tip = "对选中元素（无选中则全树）重置 IZSizeBox", Run = ResetSizeBoxes },
-                    new ToolEntry { Title = "全选内部链接零件", Tip = "扫描树中内部链接零件并加入选区", Run = SelectInternalLinkedParts }
+                    new ToolEntry { Title = "全选内部链接零件", Tip = "扫描树中内部链接零件并加入选区", Run = SelectInternalLinkedParts },
+                    new ToolEntry { Title = "选择相同零部件", Tip = "以选中件的零件名为种子，穿透全树把同名零部件全部选回", Run = SelectSameNameParts },
+                    new ToolEntry { Title = "零件置换", Tip = "先选中A（提供模型）再选中B，驱动原生「替换零件/装配」把B的外链换成A正在用的ics；两件都必须带外链", Run = ReplaceSwapBySelection }
                 },
                 // 3. 几何与坐标
                 new List<ToolEntry>
@@ -285,7 +315,8 @@ namespace caxa3dminitool
                 new List<ToolEntry>
                 {
                     new ToolEntry { Title = "导入3D曲线坐标数据", Tip = "选 txt（每行 X Y Z 毫米）生成插值样条", Run = ImportWireFromTxt },
-                    new ToolEntry { Title = "将零部件添加到BOM", Tip = "把选中零部件全部纳入 BOM 并回读 IncludedInBOM", Run = AddSelectedToBom }
+                    new ToolEntry { Title = "将零部件添加到BOM", Tip = "把选中零部件全部纳入 BOM 并回读 IncludedInBOM", Run = AddSelectedToBom },
+                    new ToolEntry { Title = "删除所有布局(除模型)", Tip = "一键静默：识别图纸环境 → 桥握手 → 扫描 → 直接删除模型以外的全部布局（需先进入图纸环境；不可撤销）", Run = DeleteAllLayoutsExceptModel }
                 }
             };
         }
@@ -436,9 +467,12 @@ namespace caxa3dminitool
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口关闭");
             // 关窗即置停止标志：不强行保存文件、不强关图纸
             _kernelStopRequested = true;
             _kernelRunning = false;
+            FlowGate.StopRequested = true;
+            PopupAutoYes.FileDialogTarget = null;
             if (_kernelTimer != null) { _kernelTimer.Stop(); _kernelTimer.Dispose(); _kernelTimer = null; }
             if (_selTimer != null) { _selTimer.Stop(); _selTimer.Dispose(); _selTimer = null; }
             Diagnostics.UiLogSink = null;
@@ -1001,6 +1035,300 @@ namespace caxa3dminitool
             {
                 Diagnostics.Log("全选内部链接零件异常：" + ex);
             }
+        }
+
+        /// <summary>
+        /// 选择相同零部件：以当前选中件的名字为种子，穿透整棵设计树把同名零部件全部选回。
+        /// 判据 = 选区回读命中数（不看 API 返回值）。
+        /// </summary>
+        private void SelectSameNameParts()
+        {
+            if (_kernelRunning)
+            {
+                Diagnostics.Log("[未执行] 内核切换进行中，请稍后再试。");
+                return;
+            }
+
+            try
+            {
+                string error, summary;
+                int selectedAfter;
+                ElementsTool.SelectSameNameComponents(_app, out error, out summary, out selectedAfter);
+                if (!string.IsNullOrEmpty(error)) Diagnostics.Log("[选择相同零部件] " + error);
+                if (!string.IsNullOrEmpty(summary)) Diagnostics.Log("选择相同零部件：" + summary);
+                RefreshSelectionLabel();
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.Log("选择相同零部件异常：" + ex);
+            }
+        }
+
+        // ================================================================ 零件置换
+
+        /// <summary>
+        /// 「零件置换」：读活选择里的两个零部件 —— <b>第一个＝A（提供模型）、第二个＝B（要被置换掉）</b>，
+        /// 确认后驱动 CAXA 原生「替换零件/装配」面板，把 B 的外链换成 A 正在用的那个 ics。
+        /// 两个件都必须带外链，虚拟件由 <c>ReplaceTool.Validate</c> 当场拒绝（用户 2026-11-03 定案）。
+        /// ★ 选中顺序是否等于用户点选顺序，ICAPI 没文档、本机也没实测 ⇒
+        ///   把两个件的分配摊开让用户核对，点「否」即交换 A/B，不默认顺序一定对。
+        /// </summary>
+        private void ReplaceSwapBySelection()
+        {
+            if (_kernelRunning)
+            {
+                Diagnostics.Log("[未执行] 内核切换进行中，请稍后再试。");
+                return;
+            }
+            if (FlowGate.Busy)
+            {
+                Diagnostics.Log("[未执行] 已有流程在运行，请等它结束或点「停止」。");
+                return;
+            }
+
+            string error;
+            List<ReplacePick> picks = ReplaceTool.ReadSelectedComponents(_app, out error);
+            if (picks.Count != 2)
+            {
+                Diagnostics.Log("[零件置换] " + error);
+                MessageBox.Show(error, AppTitleBase, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ReplacePick pickA = picks[0];       // 先选中的：提供模型，它的外链 ics 是要填进文件框的目标
+            ReplacePick pickB = picks[1];       // 后选中的：要被置换掉的那一个
+
+            while (true)
+            {
+                string why = ReplaceTool.Validate(pickA, pickB);
+                if (why != null)
+                {
+                    Diagnostics.Log("[零件置换] " + why);
+                    MessageBox.Show(why, AppTitleBase, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                string msg = "A（先选中，提供模型）：" + pickA.Describe + "\n" +
+                             "B（后选中，被置换掉）：" + pickB.Describe + "\n\n" +
+                             "把 B 的外链换成 A 正在用的文件 " + Path.GetFileName(pickA.LinkPath) + "？\n\n" +
+                             "　是　按上面分配执行\n　否　交换 A/B\n　取消　什么都不做";
+                DialogResult dr = MessageBox.Show(msg, AppTitleBase, MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+                if (dr == DialogResult.Cancel)
+                {
+                    Diagnostics.Log("[零件置换] 用户取消");
+                    return;
+                }
+                if (dr == DialogResult.Yes) break;
+
+                ReplacePick t = pickA;          // 「否」＝交换 A/B，换完再校验一轮
+                pickA = pickB;
+                pickB = t;
+            }
+
+            Diagnostics.Log("零件置换 选中：" + ReplaceTool.DescribePicks(picks));
+            RunLongFlow("零件置换：" + pickB.Name + " ← " + Path.GetFileName(pickA.LinkPath),
+                delegate { ReplaceTool.Execute(_app, pickA, pickB, Diagnostics.Log); });
+        }
+
+        // ================================================================ 删除所有布局（除模型）
+        //
+        // 移植自独立 Add-in `C:\code\ICAPI\caxa3dminitool`（第 8/9 次迭代），口径与那边完全一致：
+        //   ① 识别前台图纸环境（DrawingProbeLite，纯窗口取证，不碰 COM/CRX）
+        //   ② 图纸命令桥就绪（marker 时间 ≥ 进程启动 + PING 令牌握手）
+        //   ③ 扫描布局（CRX 枚举 PaperTable，只读；模型项两侧各过滤一遍）
+        //   ④ 静默删除（**无确认框**；CRX 侧仍校验 confirm=yes + 会话令牌 + 命令白名单）
+        //
+        // 权责边界：本进程只发指令，图纸数据库由图纸环境里的 caxa3dminitool.crx 改。
+        // 线程模型：跑在 CAXA 的 UI 线程上（RunLongFlow 的既定模型）；等待靠 LayoutBridge
+        //   内部的 DoEvents 泵，主线程消息泵不停 → CRX 的 WM_TIMER 才能取到件。
+        // 代价：误点即删且不可撤销（模型布局之外全消失），这是用户明确定下的静默口径。
+
+        private void DeleteAllLayoutsExceptModel()
+        {
+            RunLongFlow("删除所有布局(除模型)", delegate { RunDeleteLayoutsSteps(); });
+        }
+
+        /// <summary>串行四步（UI 线程，可被「停止」中断）。任一步失败即中止并写明原因。</summary>
+        private void RunDeleteLayoutsSteps()
+        {
+            // ── ① 识别前台图纸环境 ──
+            DrawingProbeResult probe = DrawingProbeLite.Describe();
+            foreach (string line in probe.Lines) Diagnostics.Log(line);
+            if (!probe.Found)
+            {
+                Diagnostics.Log("① 未进入图纸环境 —— " + probe.Summary);
+                Diagnostics.Log("删除布局：中止。请先在 CAXA 里打开一张图纸（进入图纸环境）后重试。");
+                return;
+            }
+            Diagnostics.Log("① 前台图纸：" + probe.DocName +
+                            (probe.DraftCount > 1
+                                ? "（共 " + probe.DraftCount + " 张图纸打开，CRX 作用于宿主的活动文档）"
+                                : ""));
+
+            // ── ② 图纸命令桥就绪 ──
+            if (!LayoutBridge.IsCrxLoaded())
+            {
+                string why = File.Exists(LayoutBridge.MarkerPath)
+                    ? "marker 存在但早于本进程启动（上次会话遗留，不可信）"
+                    : "marker 不存在";
+                Diagnostics.Log("② 图纸命令桥未就绪（" + why + "）—— " + LayoutBridge.LoadHint);
+                return;
+            }
+            BridgeResponse pong = LayoutBridge.Handshake();
+            if (pong == null || pong.Status != "PONG")
+            {
+                Diagnostics.Log("② 桥握手失败：" + DescribeBridge(pong));
+                return;
+            }
+            Diagnostics.Log("② 图纸命令桥已就绪（令牌 " + pong.Token + "）");
+
+            // ── ③ 扫描布局 ──
+            Diagnostics.Log("③ 扫描图纸布局 …（等待 CRX 回包）");
+            BridgeResponse scan = LayoutBridge.RequestScan();
+            if (scan == null || scan.Status != "SCAN")
+            {
+                Diagnostics.Log("③ 扫描失败：" + DescribeBridge(scan));
+                return;
+            }
+
+            // 双保险：CRX 已过滤一次，C# 再按同一判据过一遍（防协议/版本错配）
+            List<string> targets = new List<string>();
+            int filtered = 0;
+            foreach (string p in scan.Papers)
+            {
+                if (LayoutBridge.IsModelLayoutName(p)) { filtered++; continue; }
+                targets.Add(p);
+            }
+            if (filtered > 0)
+                Diagnostics.Log("③ CRX 回包含 " + filtered + " 个模型项，已剔除");
+
+            string model = string.IsNullOrEmpty(scan.Model) ? "model" : scan.Model;
+            if (targets.Count == 0)
+            {
+                Diagnostics.Log("③ 除模型（" + model + "）外没有其它布局，无需删除");
+                return;
+            }
+            Diagnostics.Log("③ 扫描到 " + targets.Count + " 个非模型布局：" +
+                            string.Join("、", targets) + "（模型=" + model + "）");
+
+            // ── ④ 静默删除（不弹任何确认框）──
+            Diagnostics.Log("④ 删除 " + targets.Count + " 个布局 中…（静默执行，模型「" + model +
+                            "」保留；等待 CRX 回包）");
+            BridgeResponse del = LayoutBridge.RequestDelete();
+            if (del == null)
+            {
+                Diagnostics.Log("④ 删除失败：无响应（空结果）");
+                return;
+            }
+            if (del.Status == "OK")
+            {
+                Diagnostics.Log("④ 完成：已删除 " + del.Deleted + " 个布局" +
+                                (string.IsNullOrEmpty(del.Message) ? "" : "（" + del.Message + "）"));
+            }
+            else
+            {
+                Diagnostics.Log("④ 删除未全部成功：" + DescribeBridge(del));
+            }
+        }
+
+        private static string DescribeBridge(BridgeResponse r)
+        {
+            if (r == null) return "无响应（空结果）";
+            string msg = string.IsNullOrEmpty(r.Message) ? r.Status : r.Message;
+            return r.Status == "TIMEOUT" ? "超时：" + msg : msg;
+        }
+
+        // ================================================================ 长流程骨架（铁律 6：进程级互斥 + 停止入口）
+
+        /// <summary>
+        /// 长流程外壳：独占闸门 → 禁表格、开代点、跑 body → 收尾一律解除武装。
+        /// 结果只写日志区，不弹模态框：流程跑在 CAXA 主线程上，裸 MessageBox 会把 CAXA 主界面
+        /// 和本插件窗口一起禁用（caxa3ddiffrename 实机 18:42 那轮的直接原因）。
+        /// </summary>
+        private void RunLongFlow(string flowName, Action body)
+        {
+            if (!FlowGate.TryAcquire(AppTitleBase, flowName))
+            {
+                MessageBox.Show("已有流程在运行，请等它结束或点「停止」。", AppTitleBase);
+                return;
+            }
+
+            SetToolsEnabled(false);
+            _btnStop.Enabled = true;
+            PopupAutoYes.Enabled = true;
+            Cursor = Cursors.WaitCursor;
+            Diagnostics.Log("========== " + flowName + " 开始 ==========");
+
+            string error = null;
+            bool stopped = false;
+            try { body(); }
+            catch (OperationStoppedException) { stopped = true; }
+            catch (Exception ex)
+            {
+                Diagnostics.Log(flowName + " failed: " + ex);
+                error = ex.Message;
+            }
+            finally
+            {
+                PopupAutoYes.Enabled = false;
+                // 停止后必须解除武装：残留的 FileDialogTarget 会把之后任何一张无关「打开」框
+                // 填成本次要导入的 ics 路径（caxa3ddiffrename 实机 09:11）。
+                PopupAutoYes.FileDialogTarget = null;
+                // 原生替换的插入例程常在我们判出成功、关掉代点之后才弹
+                // 「选择用于外部链接的零件或装配」「链接的配置」「重新附加约束」，
+                // 没人代点就一直模态挂着，整台 CAXA 连本插件窗口一起点不动 → 再盯 30 秒。
+                PopupAutoYes.WatchLatePopups(30000, flowName + " 收尾");
+                _btnStop.Enabled = false;
+                SetToolsEnabled(true);
+                FlowGate.Release();
+                Cursor = Cursors.Default;
+                RefreshSelectionLabel();
+            }
+
+            if (stopped)
+                Diagnostics.Log("已停止：" + flowName +
+                    "（已经生效的代点不会自动回退，请在 CAXA 里检查场景当前状态）");
+            else if (error != null)
+                Diagnostics.Log("失败：" + error + "\n（正文与取证块在跟踪日志 " + Diagnostics.LogPath + "）");
+            else
+                Diagnostics.Log("完成：" + flowName);
+        }
+
+        /// <summary>「停止」：只置标志，不强行保存、不关图。</summary>
+        private void StopFlow()
+        {
+            if (!FlowGate.IsBusyBy(AppTitleBase)) return;
+            FlowGate.StopRequested = true;
+            Diagnostics.Log("已请求停止，正在中止当前流程…（当前这一步走完即恢复界面）");
+        }
+
+        // ================================================================ 等待原语（STA 铁律：禁 WaitForExit / 禁死等）
+
+        /// <summary>带 DoEvents 与停止检查的轮询等待；所有长等待都走这一条。</summary>
+        internal static bool WaitUntil(string what, int timeoutMs, Func<bool> condition, int pollMs)
+        {
+            DateTime deadline = DateTime.Now.AddMilliseconds(timeoutMs);
+            while (DateTime.Now < deadline)
+            {
+                FlowGate.Touch();       // 主线程还活着：后台看门狗靠这一行判断有没有堵在某个调用里
+                try { Application.DoEvents(); } catch { }
+                if (FlowGate.StopRequested) throw new OperationStoppedException();
+                try { if (condition()) return true; }
+                catch (OperationStoppedException) { throw; }
+                catch (Exception ex) { Diagnostics.Trace(what + " 条件读取异常：" + ex.Message); }
+                System.Threading.Thread.Sleep(pollMs);
+            }
+            Diagnostics.Log(what + ": 超时 " + timeoutMs + "ms");
+            return false;
+        }
+
+        /// <summary>长轮询专用：等待期间抑制逐次 COM 调用的细粒度诊断（否则一次等待能刷出几十万字节日志）。</summary>
+        internal static bool WaitQuietly(string what, int timeoutMs, Func<bool> condition, int pollMs)
+        {
+            Diagnostics.PollQuiet = true;
+            try { return WaitUntil(what, timeoutMs, condition, pollMs); }
+            finally { Diagnostics.PollQuiet = false; }
         }
     }
 }

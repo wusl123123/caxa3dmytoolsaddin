@@ -3,6 +3,7 @@
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>Caxa3dMyTools.Contracts</RootNamespace>
     <AssemblyName>Caxa3dMyTools.Contracts</AssemblyName>
     <LangVersion>10.0</LangVersion>

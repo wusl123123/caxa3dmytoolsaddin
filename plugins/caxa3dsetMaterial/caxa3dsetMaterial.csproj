@@ -44,10 +44,11 @@
     </Reference>
   </ItemGroup>
 
-  <!-- 运行期资源：随插件目录分发（材料资料库种子 + 色卡） -->
+  <!-- 运行期资源：随插件目录分发（材料资料库种子 + 色卡 + 回填规则模板） -->
   <ItemGroup>
     <None Include="自定义材料.xml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="色卡.xml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="caxa3dsetMaterialaddfix.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

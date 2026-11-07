@@ -145,6 +145,83 @@ namespace caxa3dcodenameextraction
 
         #region 原始 COM 互操作
 
+        private const int DISPID_UNKNOWN = -1;
+
+        /// <summary>按名字通过 IDispatch 读取字符串属性（失败返回 null，不抛异常）。</summary>
+        private static string TryDispatchGetString(object comObj, string propName)
+        {
+            if (comObj == null) return null;
+            IntPtr pNames = IntPtr.Zero, pName = IntPtr.Zero, pIds = IntPtr.Zero;
+            IntPtr pDp = IntPtr.Zero, pResult = IntPtr.Zero, pExcep = IntPtr.Zero, pArgErr = IntPtr.Zero;
+            try
+            {
+                IRawDispatch d = (IRawDispatch)comObj;
+                Guid empty = Guid.Empty;
+
+                pNames = Marshal.AllocCoTaskMem(IntPtr.Size);
+                pName = Marshal.StringToCoTaskMemUni(propName);
+                pIds = Marshal.AllocCoTaskMem(4);
+                Marshal.WriteIntPtr(pNames, pName);
+                if (d.GetIDsOfNames(ref empty, pNames, 1, 0, pIds) != 0) return null;
+                int dispId = Marshal.ReadInt32(pIds);
+                if (dispId == DISPID_UNKNOWN) return null;
+
+                pDp = Marshal.AllocCoTaskMem(32);
+                pResult = Marshal.AllocCoTaskMem(24);
+                pExcep = Marshal.AllocCoTaskMem(80);
+                pArgErr = Marshal.AllocCoTaskMem(4);
+                for (int i = 0; i < 32; i++) Marshal.WriteByte(pDp, i, 0);
+                for (int i = 0; i < 24; i++) Marshal.WriteByte(pResult, i, 0);
+                for (int i = 0; i < 80; i++) Marshal.WriteByte(pExcep, i, 0);
+
+                // 同一成员可能是方法也可能是属性，两种调用标志都试
+                int hr = d.Invoke(dispId, ref empty, 0, 1 /*INVOKE_FUNC*/, pDp, pResult, pExcep, pArgErr);
+                if (hr != 0)
+                {
+                    for (int i = 0; i < 24; i++) Marshal.WriteByte(pResult, i, 0);
+                    hr = d.Invoke(dispId, ref empty, 0, 2 /*INVOKE_PROPERTYGET*/, pDp, pResult, pExcep, pArgErr);
+                }
+                if (hr != 0) return null;
+
+                short vt = Marshal.ReadInt16(pResult);
+                if (vt != 8 /*VT_BSTR*/) return null;   // 某些属性返回非字符串，视为读取失败
+                IntPtr pb = Marshal.ReadIntPtr(pResult, 8);
+                if (pb == IntPtr.Zero) return null;
+                string str = Marshal.PtrToStringBSTR(pb);
+                Marshal.FreeBSTR(pb);
+                return str;
+            }
+            catch { return null; }
+            finally
+            {
+                if (pNames != IntPtr.Zero) Marshal.FreeCoTaskMem(pNames);
+                if (pName != IntPtr.Zero) Marshal.FreeCoTaskMem(pName);
+                if (pIds != IntPtr.Zero) Marshal.FreeCoTaskMem(pIds);
+                if (pDp != IntPtr.Zero) Marshal.FreeCoTaskMem(pDp);
+                if (pResult != IntPtr.Zero) Marshal.FreeCoTaskMem(pResult);
+                if (pExcep != IntPtr.Zero) Marshal.FreeCoTaskMem(pExcep);
+                if (pArgErr != IntPtr.Zero) Marshal.FreeCoTaskMem(pArgErr);
+            }
+        }
+
+        /// <summary>只读主窗口标题（移植自 caxa3dexbtracker，供 DrawingProbe 交叉校验），失败返回 null。</summary>
+        public static string GetWindowTitle(CaxaSession session)
+        {
+            if (session == null || session.AppObject == null) return null;
+            try { return TryDispatchGetString(session.AppObject, "WindowTitle"); }
+            catch { return null; }
+        }
+
+        /// <summary>从 CAXA 标题 "[工程图文档4]" 里取文档名。</summary>
+        public static string ExtractDocName(string title)
+        {
+            if (string.IsNullOrEmpty(title)) return null;
+            int l = title.LastIndexOf('[');
+            int r = title.LastIndexOf(']');
+            if (l >= 0 && r > l) return title.Substring(l + 1, r - l - 1).Trim();
+            return title.Trim();
+        }
+
         [ComImport, Guid("00020400-0000-0000-C000-000000000046"),
          InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         private interface IRawDispatch
@@ -708,30 +785,28 @@ namespace caxa3dcodenameextraction
         /// <summary>
         /// 获取元素上的“共享”CustomPropMgr。
         /// 优先走 GetCustomPropManager(selector)+IsSharedMgr 校验；
-        /// 都拿不到共享管理器时回退 get_CustomPropMgr(vbShared=TRUE)。
+        /// 共享表铁律（规则 14.7/14.9）：候选表一律先经 IsSharedMgr()==true 确认，
+        /// 确认不了就返回 Zero 并写日志——绝不拿未确认的表凑数，也不按属性名猜表。
         /// </summary>
         private static IntPtr GetSharedCustomPropMgr(IntPtr pElem, string tag)
         {
-            IntPtr firstFallback = IntPtr.Zero;
             foreach (int selector in new int[] { 0, 1 })
             {
                 IntPtr pMgr = TryGetCustomPropManager(pElem, selector, tag);
                 if (pMgr == IntPtr.Zero) continue;
                 if (TryIsSharedMgr(pMgr, tag + ",selector=" + selector)) return pMgr;
-                if (firstFallback == IntPtr.Zero) firstFallback = pMgr;
-                else Marshal.Release(pMgr);
+                Marshal.Release(pMgr);
             }
-            // 回退路径：旧属性 getter（多数机器可用）
+            // 回退路径：旧属性 getter（vbShared=TRUE）；名义不算判据，同样要 IsSharedMgr 确认
             IntPtr pProp = GetCustomPropMgr(pElem, -1, tag);
             if (pProp != IntPtr.Zero)
             {
-                if (firstFallback != IntPtr.Zero) Marshal.Release(firstFallback);
-                return pProp;
+                if (TryIsSharedMgr(pProp, tag + ",vbShared=true")) return pProp;
+                Marshal.Release(pProp);
             }
-            if (firstFallback != IntPtr.Zero)
-                Diagnostics.Log("GetSharedCustomPropMgr(" + tag + "): 两个主路径均未确认共享，" +
-                    "使用 GetCustomPropManager 返回的第一个管理器");
-            return firstFallback;
+            Diagnostics.Log("GetSharedCustomPropMgr(" + tag + "): 三个候选都没有 IsSharedMgr=true，" +
+                "按共享表铁律本次不读写任何其它表");
+            return IntPtr.Zero;
         }
 
         /// <summary>

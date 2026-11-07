@@ -9,8 +9,8 @@ using System.Xml;
 namespace caxa3dsetMaterial
 {
     /// <summary>
-    /// 一行材料资料：分类 / 材料 / 密度 / 颜色 / 常用标记，
-    /// 以及材料页右下「属性」表的那一组物理量（只能从资料库 XML 得到，API 不提供写入）。
+    /// 一行材料条目：分类 / 材料 / 密度 / 颜色 / 常用标记，
+    /// 以及材料页右下「属性」表的那一组物理量（只能从材料库 XML 得到，API 不提供写入）。
     /// </summary>
     internal sealed class MaterialItem
     {
@@ -53,7 +53,7 @@ namespace caxa3dsetMaterial
             SigXc = "";
         }
 
-        /// <summary>是否已带物理属性（老版本资料库条目为空）。</summary>
+        /// <summary>是否已带物理属性（老版本材料库条目为空）。</summary>
         public bool HasPhysics
         {
             get { return !string.IsNullOrEmpty(Ex) || !string.IsNullOrEmpty(NuXY) || !string.IsNullOrEmpty(Kx); }
@@ -82,7 +82,7 @@ namespace caxa3dsetMaterial
     }
 
     /// <summary>
-    /// 材料资料库：%APPDATA%\caxa3dsetMaterial\自定义材料.xml。
+    /// 材料库：%APPDATA%\caxa3dsetMaterial\自定义材料.xml。
     /// 首次运行若不存在，则从 DLL 同目录的 自定义材料.xml 播种；都没有则建空库。
     /// </summary>
     internal sealed class MaterialDb
@@ -129,7 +129,7 @@ namespace caxa3dsetMaterial
             return null;
         }
 
-        /// <summary>装载资料库；返回提示信息（空表示无需提示）。</summary>
+        /// <summary>装载材料库；返回提示信息（空表示无需提示）。</summary>
         public string Load()
         {
             string msg = null;
@@ -142,12 +142,12 @@ namespace caxa3dsetMaterial
                     {
                         Directory.CreateDirectory(DataDir);
                         File.Copy(seed, FilePath, true);
-                        msg = "首次运行：已从程序目录播种资料库到 " + FilePath;
+                        msg = "首次运行：已从程序目录播种材料库到 " + FilePath;
                         Diagnostics.Log(msg);
                     }
                     else
                     {
-                        msg = "未找到资料库，已建立空库：" + FilePath;
+                        msg = "未找到材料库，已建立空库：" + FilePath;
                         Diagnostics.Log(msg);
                     }
                 }
@@ -156,14 +156,14 @@ namespace caxa3dsetMaterial
                 {
                     LoadFile(FilePath);
                     int filled = EnrichFromSeed();
-                    Diagnostics.Log("资料库已载入：" + FilePath + "，共 " + Items.Count + " 条" +
+                    Diagnostics.Log("材料库已载入：" + FilePath + "，共 " + Items.Count + " 条" +
                                     (filled > 0 ? "（其中 " + filled + " 条补齐了物理属性）" : ""));
                 }
             }
             catch (Exception ex)
             {
-                Diagnostics.Log("载入资料库失败：" + ex.Message);
-                msg = "载入资料库失败：" + ex.Message;
+                Diagnostics.Log("载入材料库失败：" + ex.Message);
+                msg = "载入材料库失败：" + ex.Message;
             }
             return msg;
         }
@@ -204,7 +204,7 @@ namespace caxa3dsetMaterial
         }
 
         /// <summary>
-        /// 老版本用户资料库没有物理属性字段：按材料名从程序目录的种子库补齐，只填空不覆盖。
+        /// 老版本用户材料库没有物理属性字段：按材料名从程序目录的种子库补齐，只填空不覆盖。
         /// 返回补齐条数。
         /// </summary>
         private int EnrichFromSeed()
@@ -276,7 +276,7 @@ namespace caxa3dsetMaterial
             return a == null ? "" : (a.Value ?? "");
         }
 
-        /// <summary>保存资料库（覆盖写，UTF-8 无 BOM）。</summary>
+        /// <summary>保存材料库（覆盖写，UTF-8 无 BOM）。</summary>
         public void Save()
         {
             Directory.CreateDirectory(DataDir);
@@ -285,7 +285,7 @@ namespace caxa3dsetMaterial
             XmlDeclaration decl = doc.CreateXmlDeclaration("1.0", "utf-8", null);
             doc.AppendChild(decl);
             doc.AppendChild(doc.CreateComment(
-                " caxa3dsetMaterial 材料资料库：界面表格直接读写本文件。字段：category=分类 name=材料名 density=密度(kg/m³) color=颜色(RRGGBB，空=不改) favorite=1 表示常用 "));
+                " caxa3dsetMaterial 材料库：界面表格直接读写本文件。字段：category=分类 name=材料名 density=密度(kg/m³) color=颜色(RRGGBB，空=不改) favorite=1 表示常用 "));
 
             XmlElement root = doc.CreateElement("MaterialDB");
             XmlAttribute ver = doc.CreateAttribute("version");
@@ -325,7 +325,7 @@ namespace caxa3dsetMaterial
             {
                 doc.Save(w);
             }
-            Diagnostics.Log("资料库已保存：" + FilePath + "，共 " + Items.Count + " 条");
+            Diagnostics.Log("材料库已保存：" + FilePath + "，共 " + Items.Count + " 条");
         }
 
         private static void AppendAttr(XmlDocument doc, XmlElement e, string name, string value)
@@ -341,7 +341,7 @@ namespace caxa3dsetMaterial
             AppendAttr(doc, e, name, value);
         }
 
-        /// <summary>按名称查一条资料（忽略大小写与首尾空格）。</summary>
+        /// <summary>按名称查一条材料（忽略大小写与首尾空格）。</summary>
         public MaterialItem FindByName(string name)
         {
             string key = (name ?? "").Trim();
@@ -383,6 +383,15 @@ namespace caxa3dsetMaterial
             _syncing = false;
 
             _master.ListChanged += OnMasterChanged;
+        }
+
+        /// <summary>
+        /// 断开与主库的联动。重建标签页时先对旧视图调用，否则每次保存/加常用都会在
+        /// master 上多留一个订阅者，旧表格还跟着主库的增删做无用同步。
+        /// </summary>
+        public void Detach()
+        {
+            if (_master != null) _master.ListChanged -= OnMasterChanged;
         }
 
         protected override void InsertItem(int index, MaterialItem item)

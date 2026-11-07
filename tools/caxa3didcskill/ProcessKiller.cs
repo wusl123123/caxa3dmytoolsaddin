@@ -11,6 +11,8 @@ namespace caxa3didcskill
     {
         public readonly List<int> KilledPids = new List<int>();
         public readonly List<string> Failures = new List<string>();
+        public readonly List<string> StuckExiting = new List<string>();
+        public readonly List<int> Vanished = new List<int>();
         public int ProtectedForeground;
         public int SkippedYoung;
         public int SkippedOtherSession;
@@ -19,9 +21,18 @@ namespace caxa3didcskill
         public string Summary()
         {
             return string.Format(
-                "杀死 {0} 个，失败 {1} 个，保护前台 {2} 个，跳过(启动保护/其他会话) {3}/{4}",
-                KilledPids.Count, Failures.Count, ProtectedForeground,
-                SkippedYoung, SkippedOtherSession);
+                "杀死 {0} 个，失败 {1} 个，卡在退出 {2} 个，自行退出 {3} 个，保护前台 {4} 个，跳过(启动保护/其他会话) {5}/{6}",
+                KilledPids.Count, Failures.Count, StuckExiting.Count, Vanished.Count,
+                ProtectedForeground, SkippedYoung, SkippedOtherSession);
+        }
+
+        /// <summary>状态行用的短口径：396 像素宽的单行标签放不下全口径，只保留六档计数。</summary>
+        public string SummaryShort()
+        {
+            return string.Format(
+                "杀死 {0}｜失败 {1}｜卡在退出 {2}｜自行退出 {3}｜保护 {4}｜跳过 {5}/{6}",
+                KilledPids.Count, Failures.Count, StuckExiting.Count, Vanished.Count,
+                ProtectedForeground, SkippedYoung, SkippedOtherSession);
         }
     }
 
@@ -71,6 +82,240 @@ namespace caxa3didcskill
         private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        // ===== Win32 显式取证（三态判据，规则 16.8）=====
+        // 背景：Process.GetProcessesByName 能枚举到 ≠ 进程一定还活着；
+        //       .NET HasExited 遇 OpenProcess 被拒时抛 Win32Exception（实测），
+        //       它返回 true 是 OS 真实报告的退出态。故“活着/已退出/打不开”必须分开记。
+
+        private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+        private const uint SYNCHRONIZE = 0x00100000;
+        private const uint PROCESS_TERMINATE = 0x0001;
+        private const uint WAIT_OBJECT_0 = 0;
+        private const uint WAIT_TIMEOUT = 258;
+        private const uint WAIT_FAILED = 0xFFFFFFFF;
+        private const uint STILL_ACTIVE = 259;   // 与“合法退出码恰好是 259”同值，歧义已在日志中注明
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryFullProcessImageNameW(IntPtr hProcess, uint dwFlags,
+            StringBuilder lpExeName, ref uint lpdwSize);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+        // 注意：必须显式 CharSet.Unicode。缺省时 DllImport 走 ANSI 入口点，
+        // 会把 ACP 字节写进 ByValTStr(260) 的 WCHAR 数组，szExeFile 全成乱码
+        // （实测：IRONCAD.exe 在表里，名字匹配却报 0 个）。整型字段偏移不受影响。
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct PROCESSENTRY32
+        {
+            public uint dwSize;
+            public uint cntUsage;
+            public uint th32ProcessID;
+            public IntPtr th32DefaultHeapID;
+            public uint th32ModuleID;
+            public uint cntThreads;
+            public uint th32ParentProcessID;
+            public int pcPriClassBase;
+            public uint dwFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string szExeFile;
+        }
+
+        /// <summary>一个 pid 的原生三态快照。所有字段读不到时保持默认值并记入 Note，绝不猜。</summary>
+        private sealed class NativeState
+        {
+            public bool InToolhelpTable;      // Toolhelp32 进程表里有这个 pid
+            public uint OsThreads;            // 进程表里报告的线程数（未命中则 0＝未知）
+            public uint ParentPid;
+            public string ExeFile = "";
+            public bool HandleOpened;
+            public int OpenErr;
+            public bool Signalled;            // WaitForSingleObject(h,0)==WAIT_OBJECT_0
+            public bool WaitFailed;
+            public int WaitErr;
+            public uint ExitCode;
+            public bool ExitCodeKnown;
+            public string ImagePath = "";
+            public string Verdict = "未知";
+
+            public string Describe()
+            {
+                return string.Format(
+                    "进程表={0} 线程={1} 父pid={2} 句柄={3}(err={4}) 等待={5} 退出码={6} 镜像={7} 判定={8}",
+                    InToolhelpTable ? "有" : "无",
+                    InToolhelpTable ? OsThreads.ToString() : "?",
+                    ParentPid,
+                    HandleOpened ? "可开" : "打不开", OpenErr,
+                    WaitFailed ? "FAILED(" + WaitErr + ")" : (Signalled ? "已退出" : "活着"),
+                    ExitCodeKnown ? ExitCode.ToString() : "?",
+                    string.IsNullOrEmpty(ImagePath) ? (string.IsNullOrEmpty(ExeFile) ? "?" : ExeFile) : ImagePath,
+                    Verdict);
+            }
+        }
+
+        /// <summary>Toolhelp32 进程表：pid → 条目。这是“任务管理器里看没看得见”的同源判据。</summary>
+        private static PROCESSENTRY32? FindInProcessTable(int pid)
+        {
+            IntPtr snap = CreateToolhelp32Snapshot(0x00000002 /*TH32CS_SNAPPROCESS*/, 0);
+            if (snap == IntPtr.Zero || (long)snap == -1) return null;
+            try
+            {
+                PROCESSENTRY32 e = new PROCESSENTRY32();
+                e.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+                if (!Process32First(snap, ref e)) return null;
+                do
+                {
+                    if (e.th32ProcessID == (uint)pid) return e;
+                }
+                while (Process32Next(snap, ref e));
+                return null;
+            }
+            finally
+            {
+                CloseHandle(snap);
+            }
+        }
+
+        private static NativeState ProbeNative(int pid)
+        {
+            NativeState s = new NativeState();
+
+            PROCESSENTRY32? entry = FindInProcessTable(pid);
+            if (entry.HasValue)
+            {
+                s.InToolhelpTable = true;
+                s.OsThreads = entry.Value.cntThreads;
+                s.ParentPid = entry.Value.th32ParentProcessID;
+                s.ExeFile = entry.Value.szExeFile;
+            }
+
+            IntPtr h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, false, (uint)pid);
+            if (h == IntPtr.Zero)
+            {
+                s.OpenErr = Marshal.GetLastWin32Error();
+            }
+            else
+            {
+                s.HandleOpened = true;
+                try
+                {
+                    uint w = WaitForSingleObject(h, 0);
+                    if (w == WAIT_FAILED)
+                    {
+                        s.WaitFailed = true;
+                        s.WaitErr = Marshal.GetLastWin32Error();
+                    }
+                    else
+                    {
+                        s.Signalled = (w == WAIT_OBJECT_0);
+                    }
+
+                    uint code;
+                    if (GetExitCodeProcess(h, out code))
+                    {
+                        s.ExitCodeKnown = true;
+                        s.ExitCode = code;
+                    }
+
+                    var sb = new StringBuilder(1024);
+                    uint len = (uint)sb.Capacity;
+                    if (QueryFullProcessImageNameW(h, 0, sb, ref len)) s.ImagePath = sb.ToString();
+                }
+                finally
+                {
+                    CloseHandle(h);
+                }
+            }
+
+            s.Verdict = Classify(s);
+            return s;
+        }
+
+        private static string Classify(NativeState s)
+        {
+            // 进程表（Toolhelp32＝任务管理器同源）与句柄是两个独立事实，必须分开说：
+            //   表里没有＋句柄报 87/3 ⇒ 真没了；表里没有＋句柄仍可开 ⇒ 对象被引用的退出态；
+            //   表里有＋句柄打不开 ⇒ 第三态（权限），绝不写成“已退出”。
+            const int ERROR_ACCESS_DENIED = 5;
+            const int ERROR_INVALID_PARAMETER = 87;
+            const int ERROR_FILE_NOT_FOUND = 2;
+            const int ERROR_PATH_NOT_FOUND = 3;
+
+            if (!s.InToolhelpTable)
+            {
+                if (s.HandleOpened) return "已退出，进程表已无（对象仍被引用）";
+                if (s.OpenErr == ERROR_INVALID_PARAMETER || s.OpenErr == ERROR_FILE_NOT_FOUND ||
+                    s.OpenErr == ERROR_PATH_NOT_FOUND) return "已退出且已从进程表消失";
+                return "进程表已无且句柄打不开(err=" + s.OpenErr + ")";
+            }
+
+            if (!s.HandleOpened)
+                return s.OpenErr == ERROR_ACCESS_DENIED ? "打不开(拒绝访问，需管理员)" : "打不开(第三态 err=" + s.OpenErr + ")";
+
+            bool exited = s.Signalled || (s.ExitCodeKnown && s.ExitCode != STILL_ACTIVE);
+            if (!exited) return "活着";
+            return s.OsThreads > 0
+                ? "已置退出码但仍有 " + s.OsThreads + " 个线程（退出挂起）"
+                : "已置退出码、无残留线程但仍在进程表（对象被引用）";
+        }
+
+        /// <summary>.NET HasExited 的真值：异常也算“读不到”，不当成“已退出”。</summary>
+        private static bool DotNetHasExited(int pid, out string note)
+        {
+            note = "";
+            try
+            {
+                using (Process p = Process.GetProcessById(pid))
+                {
+                    try { return p.HasExited; }
+                    catch (Exception ex) { note = "HasExited 异常：" + ex.GetType().Name + "(" + ex.Message + ")"; return false; }
+                }
+            }
+            catch (Exception ex)
+            {
+                note = "GetProcessById 异常：" + ex.GetType().Name + "(" + ex.Message + ")";
+                return false;
+            }
+        }
+
+        /// <summary>显式 TerminateProcess。返回是否投递成功；成功不等于进程消失，调用方必须再取证。</summary>
+        private static bool ForceTerminate(int pid, out bool openFailed)
+        {
+            openFailed = false;
+            IntPtr h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                false, (uint)pid);
+            if (h == IntPtr.Zero) { openFailed = true; return false; }
+            try { return TerminateProcess(h, 0); }
+            finally { CloseHandle(h); }
+        }
 
         /// <summary>一次 EnumWindows 取全量快照：pid → 可见且带标题的顶层窗口列表。</summary>
         private static Dictionary<int, List<WindowInfo>> CaptureVisibleTopWindows()
@@ -220,6 +465,11 @@ namespace caxa3didcskill
                     }
 
                     candidates[p.Id] = new Candidate { Pid = p.Id, StartTime = start };
+                    if (verbose)
+                    {
+                        NativeState st = ProbeNative(p.Id);
+                        log(string.Format("候选 pid={0}：{1}", p.Id, st.Describe()));
+                    }
                 }
                 catch (InvalidOperationException) { }
                 catch (Exception ex) { if (verbose) log("扫描进程出错：" + ex.Message); }
@@ -230,7 +480,59 @@ namespace caxa3didcskill
             if (verbose) log(string.Format(
                 "扫描：IRONCAD 进程 {0} 个，保护前台 {1} 个，候选 {2} 个",
                 procs.Length, foreground, candidates.Count));
+            if (verbose) LogIronFamily(snapshot, log);
             return candidates;
+        }
+
+        /// <summary>
+        /// 名字含 IRON/CAXA 的全部进程对照（含可见窗口数）。
+        /// 用途：任务管理器显示的“IRONCAD Design Collaboration Suite”未必是 IRONCAD.exe，
+        /// 先把“到底是哪个进程没走”钉死，再谈杀不杀。
+        /// </summary>
+        private static void LogIronFamily(Dictionary<int, List<WindowInfo>> snapshot, Action<string> log)
+        {
+            IntPtr snap = CreateToolhelp32Snapshot(0x00000002, 0);
+            if (snap == IntPtr.Zero || (long)snap == -1)
+            {
+                log("对照快照：Toolhelp32 失败(Win32=" + Marshal.GetLastWin32Error() + ")");
+                return;
+            }
+            try
+            {
+                PROCESSENTRY32 e = new PROCESSENTRY32();
+                e.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+                if (!Process32First(snap, ref e))
+                {
+                    log("对照快照：Process32First 失败(Win32=" + Marshal.GetLastWin32Error() + ")");
+                    return;
+                }
+                int n = 0;
+                do
+                {
+                    string name = e.szExeFile == null ? "" : e.szExeFile;
+                    if (name.IndexOf("IRON", StringComparison.OrdinalIgnoreCase) < 0 &&
+                        name.IndexOf("CAXA", StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                    List<WindowInfo> wins;
+                    snapshot.TryGetValue((int)e.th32ProcessID, out wins);
+                    int winCount = wins == null ? 0 : wins.Count;
+                    log(string.Format(
+                        "对照 pid={0} 名={1} 线程={2} 父pid={3} 可见顶层窗口={4}{5}",
+                        e.th32ProcessID, name, e.cntThreads, e.th32ParentProcessID, winCount,
+                        winCount > 0 ? "（首个：" + wins[0].Title + "）" : ""));
+                    n++;
+                }
+                while (Process32Next(snap, ref e));
+                log(string.Format("对照快照：名字含 IRON/CAXA 的进程共 {0} 个", n));
+            }
+            catch (Exception ex)
+            {
+                log("对照快照异常：" + ex.Message);
+            }
+            finally
+            {
+                CloseHandle(snap);
+            }
         }
 
         private static string FirstTitle(List<WindowInfo> windows)
@@ -322,12 +624,67 @@ namespace caxa3didcskill
                 Process p = null;
                 try
                 {
-                    p = Process.GetProcessById(cand.Pid);
-                    if (p.HasExited)
+                    // 原生三态取证先行：进程表(Toolhelp32) / 句柄 / 事件状态 / 退出码 / 线程数 / 镜像路径
+                    NativeState st = ProbeNative(cand.Pid);
+                    string dotNote;
+                    bool dotExited = DotNetHasExited(cand.Pid, out dotNote);
+                    log(string.Format("取证 pid={0}：{1} ｜ .NET HasExited={2}{3}",
+                        cand.Pid, st.Describe(), dotExited,
+                        string.IsNullOrEmpty(dotNote) ? "" : "（" + dotNote + "）"));
+
+                    if (!st.InToolhelpTable)
                     {
-                        log(string.Format("pid={0} 已自行退出", cand.Pid));
+                        // 进程表里已经没有了：真的自行退出，不算失败也不算杀死
+                        result.Vanished.Add(cand.Pid);
+                        log(string.Format("pid={0} 已不在进程表，确认自行退出（不计入失败）", cand.Pid));
                         continue;
                     }
+
+                    if (!st.HandleOpened)
+                    {
+                        result.Failures.Add(string.Format(
+                            "pid={0}：进程表里有但句柄打不开（Win32={1}），需以管理员身份运行",
+                            cand.Pid, st.OpenErr));
+                        log(result.Failures[result.Failures.Count - 1]);
+                        continue;
+                    }
+
+                    bool alive = !st.Signalled && (!st.ExitCodeKnown || st.ExitCode == STILL_ACTIVE);
+                    if (!alive)
+                    {
+                        // OS 已给出退出码，但进程仍占着进程表 ⇒ 该进程卡在“正在退出”，
+                        // 残留线程没走完（本机实测：正常退出的进程即使被持有句柄也不会留在表里）。
+                        // 此处仍必须试一次 TerminateProcess，否则“杀不掉”只是断言不是实证。
+                        string why = st.OsThreads > 0
+                            ? "仍有 " + st.OsThreads + " 个线程未结束（退出挂起）"
+                            : "无残留线程但仍在进程表";
+                        bool termOpenFailed;
+                        bool term = ForceTerminate(cand.Pid, out termOpenFailed);
+                        int termWin32 = term ? 0 : Marshal.GetLastWin32Error();
+                        if (token.WaitHandle.WaitOne(1500))
+                        {
+                            result.Canceled = true;
+                            log("已在退出挂起处理阶段停止");
+                            return result;
+                        }
+                        NativeState after2 = ProbeNative(cand.Pid);
+                        result.StuckExiting.Add(string.Format("pid={0}", cand.Pid));
+                        log(string.Format(
+                            "pid={0} 已置退出码（{1}）但仍在进程表：TerminateProcess={2}，1.5 秒后进程表={3}（线程 {4}）",
+                            cand.Pid, why,
+                            term ? "已投递" : "失败(Win32=" + termWin32 + ")",
+                            after2.InToolhelpTable ? "仍在" : "已消失",
+                            after2.InToolhelpTable ? after2.OsThreads.ToString() : "?"));
+                        if (after2.InToolhelpTable)
+                        {
+                            log(string.Format(
+                                "pid={0} 无法由本工具清除：它已在退出流程中，杀进程对它无效。请查它卡在什么资源上" +
+                                "（网络盘/USB/驱动/DLL 卸载），或注销/重启系统。", cand.Pid));
+                        }
+                        continue;
+                    }
+
+                    p = Process.GetProcessById(cand.Pid);
                     if (!string.Equals(p.ProcessName, TargetProcessName, StringComparison.OrdinalIgnoreCase))
                     {
                         log(string.Format("跳过 pid={0}：进程名已变化，疑似 PID 复用", cand.Pid));
