@@ -400,8 +400,9 @@ namespace caxa3dAttributeManageraddin
 
         /// <summary>
         /// 获取元素上的“共享”CustomPropMgr。
+        /// 共享表铁律（规则 14.7/14.9）：唯一判据 = IsSharedMgr()（槽 7）＝true，参数名义值不算证据；
         /// 优先走 GetCustomPropManager(selector)+IsSharedMgr 校验；
-        /// 都拿不到共享管理器时回退 get_CustomPropMgr(vbShared=TRUE)；
+        /// 三条候选（selector 0 → selector 1 → vbShared=TRUE）逐一试、每条都复核，末尾只允许 释放 + 日志 + 返回 Zero；
         /// 仍未取到返回 Zero，调用方判定失败——不拿未确认共享的管理器凑数。
         /// </summary>
         private static IntPtr GetSharedCustomPropMgr(IntPtr pElem, string tag)
@@ -413,10 +414,15 @@ namespace caxa3dAttributeManageraddin
                 if (TryIsSharedMgr(pMgr, tag + ",selector=" + selector)) return pMgr;
                 Marshal.Release(pMgr);
             }
-            // 回退路径：旧属性 getter（-1 = VARIANT_BOOL TRUE）
+            // 回退路径：旧属性 getter（-1 = VARIANT_BOOL TRUE）；名义不算判据，同样要 IsSharedMgr 确认
             IntPtr pProp = GetCustomPropMgr(pElem, -1, tag);
-            if (pProp != IntPtr.Zero) return pProp;
-            Diagnostics.Log("GetSharedCustomPropMgr(" + tag + "): 未取到共享 CustomPropMgr");
+            if (pProp != IntPtr.Zero)
+            {
+                if (TryIsSharedMgr(pProp, tag + ",vbShared=true")) return pProp;
+                Marshal.Release(pProp);
+            }
+            Diagnostics.Log("GetSharedCustomPropMgr(" + tag + "): 三个候选都没有 IsSharedMgr=true，" +
+                "按共享表铁律本次不读写任何其它表");
             return IntPtr.Zero;
         }
 

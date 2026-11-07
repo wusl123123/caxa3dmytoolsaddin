@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Drawing;
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using interop.ICApiIronCAD;
 
@@ -12,7 +13,7 @@ namespace caxa3dsetMaterial
     /// <summary>
     /// 材料工具主窗口（正式版）：
     ///  - 顶部「窗口前置」是 TopMost 开关（默认锁定在最上层，对齐 caxa3dmytoolsaddin 铁律）；
-    ///  - 中部为材料资料库表格（自定义材料.xml），点行即填入材料/密度/颜色，可直接改单元格后保存；
+    ///  - 中部为材料库表格（自定义材料.xml），点行即填入材料/密度/颜色，可直接改单元格后保存；
     ///  - 按钮：写入材料和颜色 / 单独写入材料 / 单独写入颜色 / 随机颜色；
     ///  - 所有成功判定只看业务侧回读（材料名、密度、自定义属性、颜色）。
     /// </summary>
@@ -34,7 +35,24 @@ namespace caxa3dsetMaterial
         private TextBox _txtDensity;
         private TextBox _txtColor;
         private CheckBox _chkOnly;
-        private TabControl _tabs;
+
+        // ---- 材料库标签条（自建：原生 TabControl 装不下时会带出一对左右翻页按钮，且无法关掉） ----
+        private Panel _toolbar;          // 滑动条 + 搜索框 + 加入常用 + 保存材料库
+        private Panel _stripClip;        // 裁剪容器（不自动滚动，靠滑动条平移内层）
+        private Panel _stripInner;       // 真正摆放标签按钮的长条
+        private Panel _contentHost;      // 当前标签页的表格
+        private HScrollBar _tabScroll;
+        private TextBox _txtSearch;
+        private Button _btnSearch;
+        private Font _tabFontBold;
+        private ToolTip _tip;
+        private readonly List<TabEntry> _tabs = new List<TabEntry>();
+        private int _currentTab = -1;
+
+        // 「搜索结果」临时页的数据：只装上一次搜索命中的那些**对象本身**（与主库同一批实例），
+        // 所以这一页只供参考、不增删行；重新搜索即替换，零命中时整页消失。
+        private BindingList<MaterialItem> _searchResults;
+
         private Button _btnFav;
         private TextBox _txtLog;
         private Button _btnCard;
@@ -42,6 +60,23 @@ namespace caxa3dsetMaterial
         private ColorCardForm _colorCard;
         private readonly Dictionary<string, Label> _propLabels = new Dictionary<string, Label>();
         private const string BaseTitle = "CAXA 3D 材料工具";
+
+        /// <summary>一个标签页 = 标签按钮 + 它自己的表格（数据源是主库的同一批对象）。</summary>
+        private sealed class TabEntry
+        {
+            public string Title;
+            public Button TabButton;
+            public DataGridView Grid;
+            public Func<MaterialItem, bool> Match;
+            /// <summary>临时页（搜索结果）：不属于材料库语义，搜索定位时不当作候选落点。</summary>
+            public bool Temporary;
+        }
+
+        // ↓↓↓ 键盘归属抢救：Ctrl+C/V/X/A/Z 归本窗口自己的文本框（机理/开关/取证见 Caxa3dMyTools.Contracts.ChordRescue）
+        protected override void OnActivated(EventArgs e) { base.OnActivated(e); Caxa3dMyTools.Contracts.ChordRescue.Install(this, msg => Diagnostics.Trace(msg)); }
+        protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口失活"); }
+        protected override void WndProc(ref Message m) { if (Caxa3dMyTools.Contracts.ChordRescue.Route(this, ref m)) return; base.WndProc(ref m); }
+        // ↑↑↑
 
         public MainForm(IZBaseApp app)
         {
@@ -53,12 +88,12 @@ namespace caxa3dsetMaterial
             ApplyTopMostVisual();
 
             Diagnostics.UiLogSink = AppendLog;
-            Diagnostics.Log("材料工具窗口已打开。资料库：" + _db.FilePath);
+            Diagnostics.Log("材料工具窗口已打开。材料库：" + _db.FilePath);
 
             string msg = _db.Load();
             RebuildTabs();
             if (!string.IsNullOrEmpty(msg)) AppendLog(msg);
-            SetStatus("资料库 " + _db.Items.Count + " 条 / " + _tabs.TabPages.Count + " 个标签页", true);
+            SetStatus("材料库 " + _db.Items.Count + " 条 / " + _tabs.Count + " 个标签页", true);
 
             // 在 Add-in 加载阶段预创建句柄，避免 OnClick 时跨窗口消息互等
             if (!IsHandleCreated) CreateHandle();
@@ -73,9 +108,10 @@ namespace caxa3dsetMaterial
             MinimumSize = new Size(820, 560);
             StartPosition = FormStartPosition.CenterScreen;
             Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
+            _tabFontBold = new Font(Font, FontStyle.Bold);
 
-            // ---- 顶部输入区 ----
-            Panel top = new Panel { Dock = DockStyle.Top, Height = 152, Padding = new Padding(10, 8, 10, 4) };
+            // ---- 顶部输入区（加入常用/保存材料库已移到标签条上方的工具栏） ----
+            Panel top = new Panel { Dock = DockStyle.Top, Height = 122, Padding = new Padding(10, 8, 10, 4) };
 
             _btnTopMost = MakeButton("窗口前置", 10, 8, 100);
             _btnTopMost.Click += (s, e) => ToggleTopMost();
@@ -148,20 +184,58 @@ namespace caxa3dsetMaterial
             _btnRandomAll.Click += (s, e) => RandomColors(true);
             top.Controls.Add(_btnRandomAll);
 
-            _btnFav = MakeButton("加入常用", 622, 84, 92);
+            _btnFav = MakeButton("加入常用", 0, 0, 92);
             _btnFav.Click += (s, e) => ToggleFavorite();
-            top.Controls.Add(_btnFav);
 
-            _btnSaveDb = MakeButton("保存资料库", 720, 84, 104);
+            _btnSaveDb = MakeButton("保存材料库", 0, 0, 104);
             _btnSaveDb.Click += (s, e) => SaveDatabase();
-            top.Controls.Add(_btnSaveDb);
 
             // 状态反馈移到窗口标题栏，不再单独放 Label 占空间（日志区已有完整反馈）
 
-            // ---- 资料库分标签页（常用 / 全部 / 各分类） ----
-            _tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Point(12, 4) };
+            // ---- 材料库标签区：滑动条 + 搜索工具栏 → 标签条 → 当前页表格 ----
+            _tip = new ToolTip();
 
-            // 右侧：材料页「属性」表（只读镜像，数据来自资料库 XML；CAXA API 不提供这些量的读写）
+            _toolbar = new Panel { Dock = DockStyle.Top, Height = 34 };
+            _tabScroll = new HScrollBar { SmallChange = 60 };
+            _tabScroll.ValueChanged += (s, e) => OnTabScrollChanged();
+            _tip.SetToolTip(_tabScroll, "左右滑动切换标签页（替代原生标签条两端的翻页按钮）");
+            _toolbar.Controls.Add(_tabScroll);
+
+            _txtSearch = new TextBox { Height = 23 };
+            _txtSearch.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; DoSearch(); }
+            };
+            _tip.SetToolTip(_txtSearch,
+                "按通配符搜索「材料」列，材料名没命中的词再查「分类」列（如 铸钢 只存在于分类名）：* 任意长度、? 单个字符（如 Q235* 、 *不锈钢* ）；不含通配符时按包含匹配");
+            _toolbar.Controls.Add(_txtSearch);
+
+            _btnSearch = new Button { Text = "搜索", Height = 26 };
+            _btnSearch.Click += (s, e) => DoSearch();
+            _toolbar.Controls.Add(_btnSearch);
+            _toolbar.Controls.Add(_btnFav);
+            _toolbar.Controls.Add(_btnSaveDb);
+            _toolbar.Resize += (s, e) => LayoutToolbar();
+
+            _stripClip = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 30,
+                BackColor = Color.FromArgb(236, 236, 236)
+            };
+            _stripInner = new Panel { Left = 0, Top = 1, Height = 28 };
+            _stripClip.Controls.Add(_stripInner);
+            _stripClip.Resize += (s, e) => UpdateStripScroll();
+
+            _contentHost = new Panel { Dock = DockStyle.Fill };
+
+            Panel tabArea = new Panel { Dock = DockStyle.Fill };
+            // Dock 布局按 z 序从后往前处理：先加 Fill，再加 Top，才能保证工具栏/标签条各占一条、表格吃剩余
+            tabArea.Controls.Add(_contentHost);
+            tabArea.Controls.Add(_stripClip);
+            tabArea.Controls.Add(_toolbar);
+
+            // 右侧：材料页「属性」表（只读镜像，数据来自材料库 XML；CAXA API 不提供这些量的读写）
             Panel detailPanel = new Panel
             {
                 Dock = DockStyle.Right,
@@ -171,7 +245,7 @@ namespace caxa3dsetMaterial
             detailPanel.Controls.Add(BuildDetailPanel());
 
             Panel gridHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10, 0, 10, 6) };
-            gridHost.Controls.Add(_tabs);
+            gridHost.Controls.Add(tabArea);
             gridHost.Controls.Add(detailPanel);
 
             // ---- 日志区 ----
@@ -209,7 +283,7 @@ namespace caxa3dsetMaterial
 
             Label title = new Label
             {
-                Text = "材料属性（只读 · 来自资料库）",
+                Text = "材料属性（只读 · 来自材料库）",
                 Dock = DockStyle.Top,
                 Height = 30,
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -301,7 +375,7 @@ namespace caxa3dsetMaterial
             return string.IsNullOrEmpty(v) ? "—" : v;
         }
 
-        /// <summary>新建一个资料表格：columns 固定，绑定给定数据源，选择变化即回填上方输入框。</summary>
+        /// <summary>新建一个材料表格：columns 固定，绑定给定数据源，选择变化即回填上方输入框。</summary>
         private DataGridView CreateGrid(object dataSource, bool editableAddDelete)
         {
             DataGridView grid = new DataGridView
@@ -343,13 +417,26 @@ namespace caxa3dsetMaterial
         }
 
         /// <summary>
-        /// 重建标签页：常用 → 全部 → 各分类（按条数降序）。
+        /// 重建标签条：常用 → 全部 → 各分类（按条数降序）。
         /// 每个页都是 MaterialViewList（与主库同一批对象），所以**任何页都能新增/删除**，
-        /// 新增行会按本页语义补默认分类/常用标记，同时进主库；保存写的是主库这一份。
+        /// 新增行会按本页语义补默认分类/常用标记，同时写回主库；保存写的是主库这一份。
+        /// 重建按标题保留原选中页（保存/加常用后不跳回第一页），并摘掉旧视图对主库的联动订阅。
         /// </summary>
         private void RebuildTabs()
         {
-            _tabs.TabPages.Clear();
+            string keep = (_currentTab >= 0 && _currentTab < _tabs.Count) ? _tabs[_currentTab].Title : null;
+
+            foreach (TabEntry en in _tabs)
+            {
+                MaterialViewList view = en.Grid == null ? null : en.Grid.DataSource as MaterialViewList;
+                if (view != null) view.Detach();
+                if (en.Grid != null) en.Grid.Dispose();
+                if (en.TabButton != null) en.TabButton.Dispose();
+            }
+            _tabs.Clear();
+            _stripInner.Controls.Clear();
+            _contentHost.Controls.Clear();
+            _currentTab = -1;
 
             List<MaterialItem> favorites = new List<MaterialItem>();
             Dictionary<string, List<MaterialItem>> byCat =
@@ -363,11 +450,10 @@ namespace caxa3dsetMaterial
                 list.Add(it);
             }
 
-            _tabs.TabPages.Add(MakeTab("常用", _db.Items,
-                it => it.Favorite,
-                it => it.Favorite = true));
-
-            _tabs.TabPages.Add(MakeTab("全部", _db.Items, null, null));
+            AddTab("常用", it => it.Favorite, it => it.Favorite = true);
+            AddTab("全部", null, null);
+            if (_searchResults != null && _searchResults.Count > 0)
+                AddTab("搜索结果 (" + _searchResults.Count + ")", null, null, _searchResults);
 
             List<KeyValuePair<string, List<MaterialItem>>> cats =
                 new List<KeyValuePair<string, List<MaterialItem>>>(byCat);
@@ -375,33 +461,316 @@ namespace caxa3dsetMaterial
             foreach (KeyValuePair<string, List<MaterialItem>> kv in cats)
             {
                 string cat = kv.Key;
-                _tabs.TabPages.Add(MakeTab(cat + " (" + kv.Value.Count + ")", _db.Items,
+                AddTab(cat + " (" + kv.Value.Count + ")",
                     it => (string.IsNullOrEmpty(it.Category) ? "未分类" : it.Category)
                             .Equals(cat, StringComparison.OrdinalIgnoreCase),
-                    it => it.Category = cat == "未分类" ? "" : cat));
+                    it => it.Category = cat == "未分类" ? "" : cat);
             }
 
-            Diagnostics.Trace("资料库标签页已重建：常用 " + favorites.Count + " 条，全部 " +
+            LayoutStrip();
+            int idx = keep == null ? -1 : _tabs.FindIndex(en => en.Title == keep);
+            SelectTab(idx >= 0 ? idx : 0);
+
+            Diagnostics.Trace("材料库标签页已重建：常用 " + favorites.Count + " 条，全部 " +
                               _db.Items.Count + " 条，分类 " + cats.Count + " 个");
         }
 
-        private TabPage MakeTab(string title, BindingList<MaterialItem> master,
-                                Func<MaterialItem, bool> match, Action<MaterialItem> init)
+        /// <summary>建一页：一个标签按钮 + 一张常驻表格（隐藏/显示切换，保住各自的滚动位置与选中行）。</summary>
+        private void AddTab(string title, Func<MaterialItem, bool> match, Action<MaterialItem> init)
         {
-            TabPage page = new TabPage(title) { Padding = new Padding(2) };
-            object ds = match == null ? (object)master : new MaterialViewList(master, match, init);
-            page.Controls.Add(CreateGrid(ds, true));
-            return page;
+            AddTab(title, match, init, null);
+        }
+
+        /// <summary>
+        /// direct != null 时这一页直接绑给定的列表（「搜索结果」临时页用），
+        /// 不再包一层过滤视图——那种页的增删会写回主库，临时页不该有这个副作用。
+        /// </summary>
+        private void AddTab(string title, Func<MaterialItem, bool> match, Action<MaterialItem> init,
+                            BindingList<MaterialItem> direct)
+        {
+            object ds;
+            if (direct != null) ds = direct;
+            else ds = match == null ? (object)_db.Items : new MaterialViewList(_db.Items, match, init);
+
+            DataGridView grid = CreateGrid(ds, direct == null);
+            grid.Visible = false;
+            if (direct != null)
+            {
+                grid.AllowUserToDeleteRows = false;
+                _tip.SetToolTip(grid, "临时页：上一次搜索的命中，重新搜索即替换；这一页不能增删行，改动材料库请用分类页或「全部」页");
+            }
+            _contentHost.Controls.Add(grid);
+
+            Button b = new Button
+            {
+                Text = title,
+                Top = 1,
+                Height = 26,
+                FlatStyle = FlatStyle.Flat,
+                TabStop = false,
+                BackColor = Color.FromArgb(228, 228, 228),
+                ForeColor = Color.FromArgb(70, 70, 70)
+            };
+            b.FlatAppearance.BorderSize = 1;
+            b.FlatAppearance.BorderColor = Color.FromArgb(190, 190, 190);
+            if (direct != null)
+                _tip.SetToolTip(b, "临时页：上一次搜索命中的 " + direct.Count +
+                                  " 条材料，重新搜索即替换；这一页不能增删行，改动材料库请用分类页或「全部」页");
+            int index = _tabs.Count;
+            b.Click += (s, e) => SelectTab(index);
+            _stripInner.Controls.Add(b);
+
+            _tabs.Add(new TabEntry
+            {
+                Title = title,
+                TabButton = b,
+                Grid = grid,
+                Match = match,
+                Temporary = (direct != null)
+            });
+        }
+
+        /// <summary>按加粗后的文字宽度排标签按钮（选中页会变粗，量宽要按最宽的那态算）。</summary>
+        private void LayoutStrip()
+        {
+            int left = 2;
+            foreach (TabEntry en in _tabs)
+            {
+                Size want = TextRenderer.MeasureText(en.Title, _tabFontBold);
+                int w = Math.Max(52, want.Width + 18);
+                en.TabButton.Left = left;
+                en.TabButton.Width = w;
+                left += w + 2;
+            }
+            _stripInner.Width = left + 2;
+            UpdateStripScroll();
+        }
+
+        /// <summary>把标签条总宽和可视宽换算成滑动条量程，再同步内层偏移。</summary>
+        private void UpdateStripScroll()
+        {
+            if (_tabScroll == null || _stripClip == null || _stripInner == null) return;
+            int visible = _stripClip.ClientSize.Width;
+            if (visible <= 0) return;
+
+            int maxScroll = Math.Max(0, _stripInner.Width - visible);
+            int large = Math.Max(1, visible);
+            // WinForms 夹 LargeChange 的上限取的是“当前 Maximum”，所以必须先给足 Maximum 再设 LargeChange，
+            // 反序会让 LargeChange 停在旧量程上，滑动条永远滚不到最后一个标签。
+            _tabScroll.Maximum = maxScroll + large - 1;
+            _tabScroll.LargeChange = large;
+
+            int value = Math.Min(Math.Max(_tabScroll.Value, 0), maxScroll);
+            _tabScroll.Value = value;
+            _stripInner.Left = -value;
+        }
+
+        /// <summary>滑动条平移标签条（ValueChanged 是唯一入口，键盘/拖动/代码赋值都走这里）。</summary>
+        private void OnTabScrollChanged()
+        {
+            if (_stripInner != null) _stripInner.Left = -_tabScroll.Value;
+        }
+
+        /// <summary>切到某一页：显示它的表格、重画标签按钮，并把该按钮滑进可视区。</summary>
+        private void SelectTab(int index)
+        {
+            if (index < 0 || index >= _tabs.Count) return;
+            _currentTab = index;
+            for (int i = 0; i < _tabs.Count; i++)
+            {
+                bool on = (i == index);
+                _tabs[i].Grid.Visible = on;
+                PaintTab(_tabs[i], on);
+            }
+            EnsureTabVisible(index);
+        }
+
+        private void PaintTab(TabEntry en, bool selected)
+        {
+            Button b = en.TabButton;
+            b.BackColor = selected ? Color.White : Color.FromArgb(228, 228, 228);
+            b.ForeColor = selected ? Color.FromArgb(0, 90, 158) : Color.FromArgb(70, 70, 70);
+            b.FlatAppearance.BorderColor = selected ? Color.FromArgb(0, 120, 212) : Color.FromArgb(190, 190, 190);
+            b.FlatAppearance.BorderSize = selected ? 2 : 1;
+            b.Font = selected ? _tabFontBold : Font;
+        }
+
+        /// <summary>把选中的标签按钮滚进可视区（搜索定位、加常用后都要用）。</summary>
+        private void EnsureTabVisible(int index)
+        {
+            if (index < 0 || index >= _tabs.Count) return;
+            int visible = _stripClip.ClientSize.Width;
+            if (visible <= 0) return;
+
+            Button b = _tabs[index].TabButton;
+            int value = _tabScroll.Value;
+            if (b.Right > value + visible) value = b.Right - visible;
+            if (b.Left < value) value = b.Left;
+
+            int maxScroll = Math.Max(0, _stripInner.Width - visible);
+            value = Math.Min(Math.Max(value, 0), maxScroll);
+            if (value != _tabScroll.Value) _tabScroll.Value = value;
+            OnTabScrollChanged();
+        }
+
+        /// <summary>工具栏一行从右往左排：保存材料库 → 加入常用 → 搜索 → 搜索框 → 剩下的宽度给滑动条。</summary>
+        private void LayoutToolbar()
+        {
+            if (_toolbar == null || _btnSaveDb == null) return;
+            int w = _toolbar.ClientSize.Width;
+            if (w < 260) return;
+
+            int x = w - 2;
+            _btnSaveDb.SetBounds(x - 104, 4, 104, 26); x -= 104 + 6;
+            _btnFav.SetBounds(x - 92, 4, 92, 26); x -= 92 + 12;
+            _btnSearch.SetBounds(x - 56, 4, 56, 26); x -= 56 + 4;
+            _txtSearch.SetBounds(x - 150, 6, 150, 23); x -= 150 + 10;
+            _tabScroll.SetBounds(0, 9, Math.Max(40, x), 16);
+
+            UpdateStripScroll();
+        }
+
+        // ================================================================ 搜索（通配符匹配「材料」列，材料名零命中时再查「分类」列）
+
+        /// <summary>* / ? 转正则；不含通配符时按「包含」处理，避免用户必须记得打星号。</summary>
+        private static Regex BuildWildcardRegex(string pattern)
+        {
+            bool hasWild = pattern.IndexOf('*') >= 0 || pattern.IndexOf('?') >= 0;
+            StringBuilder sb = new StringBuilder();
+            sb.Append('^');
+            if (!hasWild) sb.Append(".*");
+            foreach (char ch in pattern)
+            {
+                if (ch == '*') sb.Append(".*");
+                else if (ch == '?') sb.Append('.');
+                else sb.Append(Regex.Escape(ch.ToString()));
+            }
+            if (!hasWild) sb.Append(".*");
+            sb.Append('$');
+            return new Regex(sb.ToString(), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        /// <summary>通配符先搜「材料」列，材料名零命中的词再查「分类」列；命中后停在「搜索结果」页并选中第一条。</summary>
+        private void DoSearch()
+        {
+            string pattern = (_txtSearch.Text ?? "").Trim();
+            if (pattern.Length == 0)
+            {
+                Diagnostics.Log("搜索框为空：填材料名或通配符（* 任意长度、? 单个字符），如 Q235* 。");
+                SetStatus("搜索条件为空", false);
+                return;
+            }
+
+            Regex rx;
+            try { rx = BuildWildcardRegex(pattern); }
+            catch (Exception ex)
+            {
+                Diagnostics.Log("搜索式无法解析：" + ex.Message);
+                SetStatus("搜索式无效", false);
+                return;
+            }
+
+            DataGridView active = ActiveGrid;
+            if (active != null) active.EndEdit();
+
+            List<MaterialItem> hits = new List<MaterialItem>();
+            List<MaterialItem> catOnly = new List<MaterialItem>();
+            foreach (MaterialItem it in _db.Items)
+            {
+                if (it == null) continue;
+                if (rx.IsMatch((it.Name ?? "").Trim())) hits.Add(it);
+                else if (rx.IsMatch((it.Category ?? "").Trim())) catOnly.Add(it);
+            }
+            int nameHits = hits.Count;
+            hits.AddRange(catOnly);   // 材料列命中的排前面：第一条永远是更强的匹配
+
+            if (hits.Count == 0)
+            {
+                // 上一次的临时页必须跟着消失，否则留着过期结果会误导用户
+                if (_searchResults != null && _searchResults.Count > 0)
+                {
+                    _searchResults.Clear();
+                    RebuildTabs();
+                }
+                Diagnostics.Log("搜索「" + pattern + "」在「材料」列与「分类」列都零命中（材料库共 " + _db.Items.Count + " 条）。");
+                SetStatus("搜索零命中", false);
+                return;
+            }
+
+            ShowResults(hits);   // 必须先重建标签页，后面定位的才是新生成的表格
+
+            MaterialItem hit = hits[0];
+            int tab = ResultsTabIndex();
+            SelectTab(tab);
+            int row = LocateRow(_tabs[tab].Grid, hit);
+            // 切页时表格自己会先把第 0 行报一次 SelectionChanged，之后代码改 CurrentCell 不再重复抛这个事件，
+            // 所以定位完必须显式回填一次，否则输入框停在第 0 行。
+            if (row >= 0) FillInputsFromGrid(_tabs[tab].Grid);
+
+            // 命中来自哪一列要说清楚：像「铸钢」这种只存在于分类列的词，只搜材料名必然零命中
+            string scope = catOnly.Count == 0 ? "材料列 " + nameHits + " 条"
+                         : nameHits == 0 ? "全部来自「分类」列 " + catOnly.Count + " 条（材料名里没有这个词）"
+                         : "材料列 " + nameHits + " 条 + 分类列 " + catOnly.Count + " 条";
+            Diagnostics.Log(string.Format(
+                "搜索「{0}」命中 {1} 条（{8}）→ 停在「{2}」页第 {3} 行：{4} / {5}  密度={6} 颜色={7}",
+                pattern, hits.Count, _tabs[tab].Title, row + 1,
+                Show(hit.Category), hit.Name, Show(hit.Density), Show(hit.Color), scope));
+            if (hits.Count > 1)
+                Diagnostics.Log("  其余 " + (hits.Count - 1) + " 条就在同一页往下翻；要收窄就加长通配式（如 *Q235* → Q235?）");
+            SetStatus("搜索命中 " + hits.Count + " 条，已停在「" + _tabs[tab].Title + "」页", true);
+        }
+
+        /// <summary>
+        /// 把本次命中写进「搜索结果」临时页。装的是主库里**同一批对象**，所以这一页里改单元格
+        /// 等于改材料库（与分类页同语义），但增删行已在建表时关掉，临时页不动库。
+        /// </summary>
+        private void ShowResults(List<MaterialItem> hits)
+        {
+            if (_searchResults == null) _searchResults = new BindingList<MaterialItem>();
+            _searchResults.Clear();
+            foreach (MaterialItem it in hits) _searchResults.Add(it);
+            RebuildTabs();
+        }
+
+        /// <summary>「搜索结果」临时页的下标（`ShowResults` 刚重建过标签页，这一页此时必然在）；兜回「全部」页。</summary>
+        private int ResultsTabIndex()
+        {
+            for (int i = 0; i < _tabs.Count; i++)
+            {
+                if (_tabs[i].Temporary) return i;
+            }
+            for (int i = 0; i < _tabs.Count; i++)
+            {
+                if (_tabs[i].Match == null) return i;   // 「全部」
+            }
+            return 0;
+        }
+
+        /// <summary>在页内按对象引用定位行，选中并滚到它上面。</summary>
+        private static int LocateRow(DataGridView g, MaterialItem hit)
+        {
+            if (g == null) return -1;
+            for (int i = 0; i < g.Rows.Count; i++)
+            {
+                if (g.Rows[i].IsNewRow) continue;
+                if (!ReferenceEquals(g.Rows[i].DataBoundItem, hit)) continue;
+                try
+                {
+                    g.ClearSelection();
+                    g.CurrentCell = g.Rows[i].Cells[0];
+                    g.Rows[i].Selected = true;
+                    g.FirstDisplayedScrollingRowIndex = Math.Max(0, i - 3);
+                }
+                catch (Exception ex) { Diagnostics.Trace("定位行失败：" + ex.Message); }
+                return i;
+            }
+            return -1;
         }
 
         /// <summary>当前标签页里的表格。</summary>
         private DataGridView ActiveGrid
         {
-            get
-            {
-                if (_tabs.SelectedTab == null || _tabs.SelectedTab.Controls.Count == 0) return null;
-                return _tabs.SelectedTab.Controls[0] as DataGridView;
-            }
+            get { return (_currentTab >= 0 && _currentTab < _tabs.Count) ? _tabs[_currentTab].Grid : null; }
         }
 
         private MaterialItem SelectedItem
@@ -453,6 +822,8 @@ namespace caxa3dsetMaterial
 
         private void FillInputsFromGrid(DataGridView grid)
         {
+            // 其余页的表格是常驻隐藏的，它们的数据联动也会触发 SelectionChanged，不能让它改输入框
+            if (grid != ActiveGrid) return;
             if (grid == null || grid.CurrentRow == null || grid.CurrentRow.IsNewRow) return;
             MaterialItem it = grid.CurrentRow.DataBoundItem as MaterialItem;
             if (it == null) return;
@@ -494,7 +865,7 @@ namespace caxa3dsetMaterial
                     if (prop != null)
                     {
                         withMaterial++;
-                        // 用读到的材料名回查资料库，补出该材料在材料页「属性」表里的物理量
+                        // 用读到的材料名回查材料库，补出该材料在材料页「属性」表里的物理量
                         string matName = null;
                         try
                         {
@@ -507,7 +878,7 @@ namespace caxa3dsetMaterial
                         if (hit != null)
                         {
                             Diagnostics.Log(string.Format(
-                                "  资料库命中[{0}]：{1} / {2} > 弹性模量={3} 泊松比={4} 抗剪模量={5} 热膨胀={6} 热导率={7} 比热={8} 抗拉={9} 屈服={10} 抗压={11}",
+                                "  材料库命中[{0}]：{1} / {2} > 弹性模量={3} 泊松比={4} 抗剪模量={5} 热膨胀={6} 热导率={7} 比热={8} 抗拉={9} 屈服={10} 抗压={11}",
                                 hit.Category, hit.Name, hit.Model,
                                 Show(hit.Ex), Show(hit.NuXY), Show(hit.GXY), Show(hit.Alpx),
                                 Show(hit.Kx), Show(hit.C), Show(hit.SigXt), Show(hit.SigYld), Show(hit.SigXc)));
@@ -515,7 +886,7 @@ namespace caxa3dsetMaterial
                         }
                         else if (!string.IsNullOrEmpty(matName))
                         {
-                            Diagnostics.Log("  资料库无此材料[" + matName + "]，无法给出属性表值（API 不暴露这些量）");
+                            Diagnostics.Log("  材料库无此材料[" + matName + "]，无法给出属性表值（API 不暴露这些量）");
                         }
                     }
                 }
@@ -775,12 +1146,12 @@ namespace caxa3dsetMaterial
 
                 _db.Save();
                 RebuildTabs();
-                SetStatus("资料库已保存（" + _db.Items.Count + " 条）", true);
+                SetStatus("材料库已保存（" + _db.Items.Count + " 条）", true);
             }
             catch (Exception ex)
             {
-                Diagnostics.Log("保存资料库失败：" + ex.Message);
-                SetStatus("保存资料库失败", false);
+                Diagnostics.Log("保存材料库失败：" + ex.Message);
+                SetStatus("保存材料库失败", false);
             }
         }
 
@@ -791,19 +1162,20 @@ namespace caxa3dsetMaterial
             if (it == null)
             {
                 Diagnostics.Log("请先在表格里选中一行，再加入常用。");
-                SetStatus("未选中资料行", false);
+                SetStatus("未选中材料行", false);
                 return;
             }
 
             it.Favorite = !it.Favorite;
             RebuildTabs();
             Diagnostics.Log("[" + it.Name + "] " + (it.Favorite ? "已加入常用" : "已移出常用") +
-                            "（记得点「保存资料库」持久化）");
+                            "（记得点「保存材料库」持久化）");
             SetStatus(it.Favorite ? "已加入常用" : "已移出常用", true);
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口关闭");
             if (_colorCard != null && !_colorCard.IsDisposed) _colorCard.Close();
             Diagnostics.UiLogSink = null;
             base.OnFormClosed(e);

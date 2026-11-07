@@ -568,7 +568,6 @@ namespace caxa3dsetMaterial
         /// </summary>
         public static IZCustomPropMgr GetSharedPropMgr(IZElement elem, out int selector)
         {
-            IZCustomPropMgr fallback = null;
             foreach (int s in new[] { 0, 1 })
             {
                 IZCustomPropMgr mgr = GetPropMgr(elem, s);
@@ -585,12 +584,12 @@ namespace caxa3dsetMaterial
                 {
                     Diagnostics.Trace("IsSharedMgr(selector=" + s + ") 异常: " + ex.Message);
                 }
-                if (fallback == null) fallback = mgr;
             }
-            selector = 1;
-            if (fallback != null)
-                Diagnostics.Trace("GetSharedPropMgr: 未确认共享表，回退首个管理器");
-            return fallback;
+            selector = -1;
+            // 共享表铁律（规则 14.7/14.9）：没确认到 IsSharedMgr=true 就返回 null，
+            // 调用方判失败；绝不把「第一个拿到的管理器」（很可能是零件级表）当兜底。
+            Diagnostics.Trace("GetSharedPropMgr: 两个 selector 都没有 IsSharedMgr=true，按共享表铁律本次不读写任何其它表");
+            return null;
         }
 
         /// <summary>

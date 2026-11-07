@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- caxa3dBatchMasterView —— CAXA 3D 图纸环境 CRX 桥接模块（caxa3dBatchMaster「刷新工程图」专属）
+     职责：**只做 C# ↔ 图纸环境的联系通道**。随 CAXADraft 自动加载（登记由 C# 侧部署负责），
+           加载只做准备（marker + 清残留 + 会话令牌 + 桥定时器），**不建 UI、不注册命令、不自主执行**；
+           运行期只被动等 C# 的 PING / CLOSEDOC / CLOSERAW / SAVE / EXEC_NATIVE。
+     来源：以仓内现役桥接型 CRX 样板为结构蓝本（其三条静默丢请求路径已堵掉）；
+           图纸侧动手手法（CX_save 同路保存 / WM_CLOSE 关窗 / 按类名认图纸窗口）取自现役图纸 CRX 产线实现。
+           %TEMP% 前缀统一 caxa3dbatchmaster_view_，与既有 6 个 CRX 桥全部换开。
+     编译：powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
+           或  MSBuild caxa3dBatchMasterView.vcxproj /p:Configuration=Release /p:Platform=x64 -->
+<Project DefaultTargets="Build" ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectName>caxa3dBatchMasterView</ProjectName>
+    <ProjectGuid>{7A4F2C15-9B3E-4D6A-8C21-0E5F6D7A8B93}</ProjectGuid>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+    <CLRSupport>false</CLRSupport>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetExt>.crx</TargetExt>
+    <OutDir>$(ProjectDir)bin\</OutDir>
+    <IntDir>$(ProjectDir)obj\</IntDir>
+    <!-- CAXA 3D 2027 官方 CRX SDK（2024 共用同一套 ABI） -->
+    <CaxaCrxSdk>C:\Program Files\CAXA\CAXA 3D\2027\bin\CAXADraft\CRX</CaxaCrxSdk>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Optimization>MaxSpeed</Optimization>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <LanguageStandard>stdcpp14</LanguageStandard>
+      <PreprocessorDefinitions>_WIN64;_WINDOWS;CAXA3DBATCHMASTERVIEW_MODULE;NDEBUG;_AFXEXT;_CCRXAPP;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(CaxaCrxSdk)\Inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <!-- 4828：CRX 自带头文件是 GBK，与 /utf-8 冲突；只影响注释里的中文，属噪声 -->
+      <DisableSpecificWarnings>4828;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>StdAfx.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <Link>
+      <LinkDLL>true</LinkDLL>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <TargetMachine>MachineX64</TargetMachine>
+      <AdditionalLibraryDirectories>$(CaxaCrxSdk)\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>Crx.lib;CrxDb.lib;CrxEdApi.lib;CrxGe.lib;CrxGi.lib;CrxUi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="StdAfx.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="caxa3dBatchMasterView.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Use</PrecompiledHeader>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="StdAfx.h" />
+    <!-- 被 caxa3dBatchMasterView.cpp #include 的标题栏能力实现；登记以便 IDE 索引与增量依赖跟踪 -->
+    <ClInclude Include="TitleBlockBridge.inl" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

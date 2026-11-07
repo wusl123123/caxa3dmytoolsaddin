@@ -37,6 +37,9 @@ src/Host/*.pdb
 *.tlog
 *.lastbuildstate
 
+# CRX 桥编译产物（仓库只保留 C++ 源码）
+*.crx
+
 # ---------- 强名称私钥（不入库） ----------
 # 仓库不含 ICApiAddin.snk，编译前需自备：
 #   Lib\ICApiAddin.snk 以及各插件下的 Lib\ICApiAddin.snk
@@ -59,6 +62,7 @@ desktop.ini
 .workbuddy/
 .qoder/
 .claude/
+.screenshots/
 
 # ---------- 项目总结文档（仅保留本地，不入库） ----------
 # 本项目、各子插件与 tools 下的“-项目总结”文档属于内部开发记录，

@@ -27,6 +27,11 @@ namespace caxa3dTreeBom
         private readonly Dictionary<string, Dictionary<string, string>> _propCache =
             new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>与 _propCache 同键的「取值来源」缓存（属性 / BOM:命中标签 / 专用:专用词 / 空＝读不到）。
+        /// 存在的意义＝同一元素的 ExportSelfBOM 只向宿主调一次（大装配逐列重算会拖死主线程）。</summary>
+        private readonly Dictionary<string, Dictionary<string, string>> _srcCache =
+            new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>本轮已告警过的键（去重，避免刷屏）。</summary>
         private readonly HashSet<string> _warned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -76,6 +81,7 @@ namespace caxa3dTreeBom
         {
             var rows = new List<BomRow>();
             _propCache.Clear();
+            _srcCache.Clear();
             _warned.Clear();
             _visited = 0;
 
@@ -214,8 +220,10 @@ namespace caxa3dTreeBom
             if (string.IsNullOrEmpty(checkFile) && level == 1) checkFile = docPath;
             row.HasDrawing = CheckDrawing(level, checkFile);
 
-            Dictionary<string, string> props = ReadPropsCached(elem, file, name);
+            Dictionary<string, string> srcs;
+            Dictionary<string, string> props = ReadPropsCached(elem, file, name, out srcs);
             foreach (var kv in props) row.Properties[kv.Key] = kv.Value;
+            foreach (var kv in srcs) row.Sources[kv.Key] = kv.Value;
 
             row.PartNumber = FindPartNumber(row, elem);
             return row;
@@ -223,13 +231,99 @@ namespace caxa3dTreeBom
 
         private Dictionary<string, string> ReadPropsCached(IZElement elem, string file, string name)
         {
+            Dictionary<string, string> ignore;
+            return ReadPropsCached(elem, file, name, out ignore);
+        }
+
+        /// <summary>同一分组键（外链文件＋元素名）只向宿主读一次，返回值＝属性值表，srcOut＝同键的取值来源表。</summary>
+        private Dictionary<string, string> ReadPropsCached(IZElement elem, string file, string name,
+                                                           out Dictionary<string, string> srcOut)
+        {
             string key = (string.IsNullOrEmpty(file) ? "virtual|" : file) + "|" + name;
             Dictionary<string, string> props;
-            if (_propCache.TryGetValue(key, out props)) return props;
+            Dictionary<string, string> srcs;
+            if (_propCache.TryGetValue(key, out props) && _srcCache.TryGetValue(key, out srcs))
+            {
+                srcOut = srcs;
+                return props;
+            }
 
-            props = _svc.ReadRowProperties(elem, PropertyHeaders);
+            props = _svc.ReadRowProperties(elem, PropertyHeaders, out srcs);
             _propCache[key] = props;
+            _srcCache[key] = srcs;
+            srcOut = srcs;
             return props;
+        }
+
+        /// <summary>
+        /// 把逐行来源汇总成「每个表头列的主要来源」（供日志汇总行与列头提示用）。
+        /// 口径＝该列**有值**的行里出现次数最多的来源串；同票时按 属性 &gt; BOM &gt; 专用 的优先级定；
+        /// 该列所有行都没值＝空串（第三态，与「取到但空白」分开记）。
+        /// </summary>
+        public Dictionary<string, string> SummarizeSources(IEnumerable<BomRow> rows)
+        {
+            var summary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (rows == null) return summary;
+
+            var perHeader = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (BomRow r in rows)
+            {
+                if (r == null) continue;
+                foreach (string h in PropertyHeaders)
+                {
+                    string key = (h ?? "").Trim();
+                    if (key.Length == 0) continue;
+
+                    string src;
+                    if (!r.Sources.TryGetValue(h, out src) && !r.Sources.TryGetValue(key, out src)) src = "";
+                    src = (src ?? "").Trim();
+                    if (src.Length == 0) continue;   // 没来源＝这一格是第三态，不参与“主要来源”投票
+
+                    Dictionary<string, int> bucket;
+                    if (!perHeader.TryGetValue(key, out bucket))
+                    {
+                        bucket = new Dictionary<string, int>(StringComparer.Ordinal);
+                        perHeader[key] = bucket;
+                    }
+                    int old;
+                    bucket.TryGetValue(src, out old);
+                    bucket[src] = old + 1;
+                }
+            }
+
+            foreach (string h in PropertyHeaders)
+            {
+                string key = (h ?? "").Trim();
+                if (key.Length == 0) continue;
+                Dictionary<string, int> bucket;
+                if (!perHeader.TryGetValue(key, out bucket) || bucket.Count == 0)
+                {
+                    summary[h] = "";
+                    continue;
+                }
+                string best = "";
+                int bestScore = 0, bestRank = int.MaxValue;
+                foreach (var kv in bucket)
+                {
+                    int rank = SourceRank(kv.Key);
+                    if (kv.Value > bestScore || (kv.Value == bestScore && rank < bestRank))
+                    {
+                        best = kv.Key; bestScore = kv.Value; bestRank = rank;
+                    }
+                }
+                summary[h] = best;
+            }
+            return summary;
+        }
+
+        /// <summary>同票时的优先级：属性(0) &gt; BOM(1) &gt; 专用(2) &gt; 其它(3)。</summary>
+        private static int SourceRank(string src)
+        {
+            if (string.Equals(src, "属性", StringComparison.Ordinal)) return 0;
+            if (src.StartsWith("BOM:", StringComparison.Ordinal)) return 1;
+            if (src.StartsWith("专用:", StringComparison.Ordinal)) return 2;
+            return 3;
         }
 
         private static string FindPartNumber(BomRow row, IZElement elem)
@@ -281,6 +375,7 @@ namespace caxa3dTreeBom
         {
             if (rows == null || rows.Count == 0) return 0;
             _propCache.Clear();
+            _srcCache.Clear();
 
             int changed = 0;
             for (int i = 0; i < rows.Count; i++)

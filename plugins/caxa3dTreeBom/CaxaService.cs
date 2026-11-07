@@ -448,16 +448,8 @@ namespace caxa3dTreeBom
             return null;
         }
 
-        public static IZCustomPropMgr GetPartPropMgr(IZElement elem)
-        {
-            for (int s = 0; s <= 1; s++)
-            {
-                IZCustomPropMgr mgr = GetPropMgr(elem, s);
-                if (mgr == null) continue;
-                try { if (!mgr.IsSharedMgr()) return mgr; } catch { }
-            }
-            return null;
-        }
+        // 共享表铁律（规则 14.7/14.9）：本工程不再提供零件级（非共享）管理器。
+        // 读不到共享表就是第三态，禁止换成另一张表再试一次。
 
         /// <summary>SC 开头的属性属于共享表（本机实证）。</summary>
         private static bool IsSharedPropName(string name)
@@ -475,29 +467,26 @@ namespace caxa3dTreeBom
             return h;
         }
 
-        /// <summary>读取单个自定义属性（按属性名判断主表，另一张表兜底）。</summary>
+        /// <summary>读取单个自定义属性：只读共享表（IsSharedMgr()==true 的那张），
+        /// 读不到＝第三态；不查零件级表兜底，也不按属性名前缀换表（规则 14.7/14.9）。</summary>
         public static bool TryGetCustomProp(IZElement elem, string propName, out string value)
         {
             value = null;
             if (elem == null || string.IsNullOrEmpty(propName)) return false;
 
-            bool wantShared = IsSharedPropName(propName);
-            IZCustomPropMgr primary = wantShared ? GetSharedPropMgr(elem) : GetPartPropMgr(elem);
-            IZCustomPropMgr secondary = wantShared ? GetPartPropMgr(elem) : GetSharedPropMgr(elem);
-
-            IZCustomPropMgr[] order = { primary, secondary };
-            for (int i = 0; i < order.Length; i++)
+            IZCustomPropMgr mgr = GetSharedPropMgr(elem);
+            if (mgr == null)
             {
-                IZCustomPropMgr mgr = order[i];
-                if (mgr == null) continue;
-                try
-                {
-                    string v; bool found;
-                    mgr.GetCustomPropAsString(propName, out v, out found);
-                    if (found) { value = v ?? ""; return true; }
-                }
-                catch { }
+                Diagnostics.Trace("TryGetCustomProp(" + propName + ")：GetCustomPropManager(0/1) 里没有 IsSharedMgr=true 的表");
+                return false;
             }
+            try
+            {
+                string v; bool found;
+                mgr.GetCustomPropAsString(propName, out v, out found);
+                if (found) { value = v ?? ""; return true; }
+            }
+            catch { }
             return false;
         }
 
@@ -538,18 +527,44 @@ namespace caxa3dTreeBom
         }
 
         /// <summary>
-        /// 按表头名读取一行所需的全部属性。
-        /// SC* 表头：只认"精确同名"的自定义属性（与 caxa3dAttributeManageraddin 语义一致），
-        ///          不做去前缀、不做 BOM 设置兜底，避免 SC备注 被 GetBOMSetting 的描述等字段混淆填充；
-        /// 其它表头：精确属性 → 专用兜底（名称/材料/图号/备注）。
+        /// 按表头名读取一行所需的全部属性（旧签名，不关心取值来源时用）。
         /// </summary>
         public Dictionary<string, string> ReadRowProperties(IZElement elem, IList<string> headers)
         {
+            Dictionary<string, string> src;
+            return ReadRowProperties(elem, headers, out src);
+        }
+
+        /// <summary>
+        /// 按表头名读取一行所需的全部属性，并回传每列的**取值来源**（sourcesOut，键＝表头原文）。
+        ///
+        /// 【通道阶梯＝用户指令 2026-11-06 23:37「优先从自定义属性中获取，没有数据时候兜底从 BOM 导出」】
+        ///   ① 自定义属性**共享表**（唯一铁律，规则 14.7/14.9：只认 IsSharedMgr()==true 的那张表，
+        ///      读不到＝第三态，不换表、不按前缀分流）→ 来源串 "属性"；
+        ///   ② BOM 导出兜底（IZSceneElement.ExportSelfBOM 整行快照，按候选名匹配；同一元素只取一次快照，
+        ///      所有列复用）→ 来源串 "BOM:&lt;命中的 label&gt;"；
+        ///      候选名＝表头原名 → 去 SC 前缀 → 官方字典 IC_BOM_DIC.xml 的内部键，
+        ///      用户可在 %APPDATA%\caxa3dTreeBom\caxa3dTreeBom表头字段映射.txt 里覆盖整列候选或写「无」禁用兜底。
+        ///   ③ 原有的非 SC 专用兜底（名称/材料/图号/备注 → 元素名 / 材料通道 / BOM 设置）→ "专用:名称" 等。
+        ///
+        /// 行为变更留痕：②之前 SC* 表头「没有该属性就留空、绝不兜底」（本项目踩坑 8，针对的是
+        /// GetBOMSetting 的描述串台）。本轮按用户新指令改为 **SC* 同样走 ②**，但 ② 只查 ExportSelfBOM 的
+        /// 同名 label（实机 labels 里确有 SC图号/SC名称 这类中文列名），**不查 GetBOMSetting**，
+        /// 所以原来的串台面不存在；③仍只对非 SC 表头开放。
+        ///
+        /// 「读不到」与「读到空值」分家：①②③ 都只认**非空白**才算命中，全空＝留第三态（空串＋空来源），
+        /// 不写默认值、不用别的列凑数。
+        /// </summary>
+        public Dictionary<string, string> ReadRowProperties(IZElement elem, IList<string> headers,
+                                                            out Dictionary<string, string> sourcesOut)
+        {
             var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var sources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            sourcesOut = sources;
             if (headers == null) return result;
             if (elem == null)
             {
-                foreach (string h in headers) result[h] = "";
+                foreach (string h in headers) { result[h] = ""; sources[h] = ""; }
                 return result;
             }
 
@@ -559,52 +574,79 @@ namespace caxa3dTreeBom
 
             string material = null;
 
+            // ② 的快照懒加载：只有真的需要兜底时才向宿主调一次 ExportSelfBOM，
+            // 之后本行所有列复用（大装配逐列重算会拖死主线程）。
+            BomSnapshot snap = null;
+            bool snapBuilt = false;
+
             foreach (string raw in headers)
             {
                 if (string.IsNullOrWhiteSpace(raw)) continue;
                 string h = raw.Trim();
                 string val = "";
 
-                // 1) 精确属性名（SC* 走共享表）
+                // —— ① 自定义属性共享表（精确同名）——
                 if (TryGetCustomProp(elem, h, out val) && !string.IsNullOrWhiteSpace(val))
                 {
                     result[raw] = val.Trim();
+                    sources[raw] = "属性";
                     continue;
                 }
 
-                // 2) SC* 表头到此为止：没有该属性就留空，绝不回退到其它字段
+                // —— ② BOM 导出兜底（SC* 与非 SC 一视同仁；用户显式禁用的列跳过）——
+                string[] cands = HeaderBomMap.IsDisabled(h) ? new string[0] : HeaderBomMap.Candidates(h);
+                if (cands.Length > 0)
+                {
+                    if (!snapBuilt) { snap = BomExportReader.GetSnapshot(elem); snapBuilt = true; }
+                    BomHit hit = snap.Find(cands);
+                    if (hit.Found)
+                    {
+                        result[raw] = hit.Value;
+                        sources[raw] = "BOM:" + hit.Label;
+                        Diagnostics.Trace("BOM 兜底命中：表头「" + h + "」→ label「" + hit.Label + "」（"
+                            + hit.Mode + "）｜" + hit.Note);
+                        continue;
+                    }
+                    if (snapBuilt && !string.IsNullOrEmpty(hit.Note))
+                        Diagnostics.Trace("BOM 兜底未命中：表头「" + h + "」｜候选=" + string.Join("、", cands)
+                            + "｜" + hit.Note);
+                }
+
+                // —— ③ 非 SC 表头的专用兜底（SC* 到此为止：三条通道都没数据就留第三态）——
                 if (IsSharedPropName(h))
                 {
                     result[raw] = "";
+                    sources[raw] = "";
                     continue;
                 }
 
-                // 3) 非 SC 表头的专用兜底
                 string v2 = "";
+                string src2 = "";
                 switch (h)
                 {
                     case "名称":
                     case "零件名称":
                     case "零件名":
-                        v2 = elemName;
+                        v2 = elemName; src2 = "专用:名称";
                         break;
                     case "材料":
                     case "材质":
                         if (material == null) material = GetMaterial(elem);
-                        v2 = material;
+                        v2 = material; src2 = "专用:材料";
                         break;
                     case "图号":
                     case "零件号":
                     case "零件编号":
                     case "代号":
-                        v2 = bomPartNum;
+                        v2 = bomPartNum; src2 = "专用:图号";
                         break;
                     case "备注":
                     case "描述":
-                        v2 = bomDesc;
+                        v2 = bomDesc; src2 = "专用:备注";
                         break;
                 }
-                result[raw] = v2;
+                result[raw] = string.IsNullOrWhiteSpace(v2) ? "" : v2.Trim();
+                sources[raw] = string.IsNullOrWhiteSpace(v2) ? "" : src2;
             }
 
             return result;

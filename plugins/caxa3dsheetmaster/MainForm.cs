@@ -56,6 +56,12 @@ namespace caxa3dsheetmaster
         private Button _btnClearLog;
         private Timer _timer;
 
+        // ↓↓↓ 键盘归属抢救：Ctrl+C/V/X/A/Z 归本窗口自己的文本框（机理/开关/取证见 Caxa3dMyTools.Contracts.ChordRescue）
+        protected override void OnActivated(EventArgs e) { base.OnActivated(e); Caxa3dMyTools.Contracts.ChordRescue.Install(this, msg => Diagnostics.Trace(msg)); }
+        protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口失活"); }
+        protected override void WndProc(ref Message m) { if (Caxa3dMyTools.Contracts.ChordRescue.Route(this, ref m)) return; base.WndProc(ref m); }
+        // ↑↑↑
+
         public MainForm(IZBaseApp siteApp)
         {
             _siteApp = siteApp;
@@ -1720,6 +1726,7 @@ namespace caxa3dsheetmaster
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+            Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口关闭");
             try { if (_timer != null) { _timer.Stop(); _timer.Dispose(); } } catch { }
             Diagnostics.UiLogSink = null;
             if (_session != null) { _session.Dispose(); _session = null; }
