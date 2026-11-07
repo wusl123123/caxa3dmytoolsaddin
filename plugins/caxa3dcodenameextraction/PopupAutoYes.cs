@@ -1,3 +1,5 @@
+﻿// 机械移植自工程 caxa3dexbtracker 的 PopupAutoYes.cs（全文件）。仅改 namespace 与项目内资源名，逻辑未动。
+// 机械移植自工程 caxa3dcodenameextraction 的 PopupAutoYes.cs（全文件）。仅改 namespace，逻辑未动。
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -7,10 +9,11 @@ using System.Threading;
 namespace caxa3dcodenameextraction
 {
     /// <summary>
-    /// 弹窗自动确认：批处理期间后台线程每 250ms 枚举本进程所有顶层窗口，
+    /// 弹窗自动确认：后台线程每 120ms 枚举本进程 + 图纸进程所有顶层窗口，
     /// 找到带「是 / Yes / 确定 / OK」按钮的对话框即模拟点击（BM_CLICK）。
     ///
-    /// 仅在批处理运行期间启用（Enabled=true），处理完立即关闭，
+    /// ★ 只经 <see cref="Borrow(string)"/> 借用、用 <c>using</c> 归还（见「借还记账」区块）：
+    /// 租约到期后通用代点全停，只留一段只认迟到业务框的收尾巡检，
     /// 避免误点用户在 CAXA 里的其他正常对话框。
     /// </summary>
     internal static class PopupAutoYes
@@ -67,10 +70,30 @@ namespace caxa3dcodenameextraction
         };
 
         /// <summary>
+        /// 「全部取消」类按钮：字体缺失框「指定形文件」用它一次性回落到全局缺省字体。
+        /// 助记键位置没取证过，所以按前缀认，不列死形式。
+        /// </summary>
+        private static bool IsCancelAll(string norm)
+        {
+            return norm.StartsWith("全部取消", StringComparison.Ordinal) ||
+                   norm == "cancel all" || norm == "&cancel all";
+        }
+
+        /// <summary>
         /// 文件选择对话框的目标路径（非空时启用「自动填入并打开」）：
         /// CAXA 打开 exb 时若需要指向改名后的 ics，会自动填这个路径并点打开。
         /// </summary>
         public static volatile string FileDialogTarget;
+
+        /// <summary>
+        /// 「请更新3D文件位置」的后续布防（一次性）：图纸里的外链 ics 找不到时，CAXA 在打开图纸
+        /// 这一步弹这张框，点「是」之后**紧接着**再弹一张「打开」要人指新位置。
+        /// 流程把正确的 ics 全路径放这里，点完「是」就转进 <see cref="FileDialogTarget"/>，
+        /// 下一张真文件框自动填并点「打开」，本字段随即清空。
+        /// 不布防就是实机 11:12:42 的样子：点是 → 那张「打开」被当无关文件框取消
+        /// （:445）→ 立刻「三维文件不存在!」（:450），位置永远没更新上。
+        /// </summary>
+        public static volatile string Locate3dAfterPrompt;
 
         /// <summary>
         /// 改名时 CAXA 自弹的「你是否要修改和保存这个外链文件的文件名?」，置了本标志就改点「取消」。
@@ -95,25 +118,154 @@ namespace caxa3dcodenameextraction
         /// <summary>挂起图纸进程（CAXADraft）的代点：本进程弹窗照常点，只暂停对图纸进程的处理。</summary>
         public static volatile bool Suspend;
 
-        public static bool Enabled
-        {
-            get { return _enabled; }
-            set
-            {
-                _enabled = value;
-                if (value)
-                {
-                    _clickedOnce.Clear();
-                    EnsureThread();
-                }
-            }
-        }
+        /// <summary>代点引擎当前是否在跑。<b>只读</b> —— 开启只能走 <see cref="Borrow(string)"/>。</summary>
+        public static bool Enabled { get { return _enabled; } }
 
         private static void EnsureThread()
         {
             if (_thread != null && _thread.IsAlive) return;
             _thread = new Thread(Loop) { IsBackground = true, Name = "PopupAutoYes" };
             _thread.Start();
+        }
+
+        // ------------------------------------------------------------ 借还记账
+
+        /// <summary>
+        /// ★ 借还铁律：代点引擎是<b>租</b>来的，不是<b>开</b>来的。
+        ///
+        /// 本类的扫描线程一旦起来就 <c>while(true)</c> 永不退出，"Enabled=true 之后谁去置 false"
+        /// 全靠调用方自觉 ⇒ 实机审计（2026-11-05）全项目只有 1 处置 false（还被 prodFlow 门控包住），
+        /// 其余流程都是"蹭上一个流程留下的开"。后果：流程早就结束了，后台还在点用户自己打开的框。
+        ///
+        /// 现在把纪律写进类型：`Enabled` 只有 getter，开启必须
+        /// <c>using (var b = PopupAutoYes.Borrow("更新工程图链接文件")) { ... }</c>，
+        /// 出了 using（含异常）自动归还；最后一笔归还时关引擎并只留一段收尾巡检
+        /// （<see cref="WatchLatePopups"/>，只认 <see cref="TailTitles"/> 那几张业务框）。
+        ///
+        /// 计数而不是布尔：流程可以套流程（钣金流程内部再借一次），外层不能被内层归还关掉。
+        /// 在借数不为 0 时又借 ⇒ 当场写日志点名，漏还下一笔借用就暴露，不用等实机翻车。
+        /// </summary>
+        private static readonly object _borrowSync = new object();
+        private static readonly List<BorrowToken> _borrows = new List<BorrowToken>();
+        private static int _borrowSeq;
+
+        /// <summary>
+        /// 收尾巡检默认时长。迟到业务框只在命令返回后的一两秒里弹（原生插入例程跑完才弹），
+        /// 20 秒是覆盖该窗口 + 留余量的保守档；<b>实测最迟到达时间还没量过</b>（本方法此前零调用点）。
+        /// 期间不会误点用户的框：扫描线程此时按 tailOnly 只认 <see cref="TailTitles"/>。
+        /// </summary>
+        private const int DefaultTailMs = 20000;
+
+        /// <summary>借一代点引擎，归还时机 = 返回的 token 被 Dispose（请用 <c>using</c>）。</summary>
+        public static IDisposable Borrow(string why) { return Borrow(why, DefaultTailMs); }
+
+        public static IDisposable Borrow(string why, int tailMs)
+        {
+            BorrowToken token;
+            int after;
+            bool first;
+            lock (_borrowSync)
+            {
+                _borrowSeq++;
+                long epoch = FlowGate.Epoch;
+                token = new BorrowToken("#" + _borrowSeq + "「" + why + "」", why, tailMs, epoch);
+                if (_borrows.Count > 0)
+                {
+                    BorrowToken foreign = null;
+                    for (int i = 0; i < _borrows.Count; i++)
+                        if (_borrows[i].Epoch != epoch) { foreign = _borrows[i]; break; }
+                    if (foreign != null)
+                        Diagnostics.Log("PopupAutoYes: 借还记错账 —— 借 " + token.Tag + " 时" + foreign.Tag +
+                                        " 还没还（流程代号 " + foreign.Epoch + " ≠ " + epoch +
+                                        "）：那条流程漏了 Dispose");
+                    else
+                        Diagnostics.Log("PopupAutoYes: 同一流程内嵌套借用 " + token.Tag + "（已借 " +
+                                        _borrows.Count + " 笔，联动链套单步按钮属正常）");
+                }
+                _borrows.Add(token);
+                after = _borrows.Count;
+                first = after == 1;
+            }
+            if (first) _clickedOnce.Clear();   // 嵌套借用不清账：同一轮里已点过的框不许再点
+            _enabled = true;
+            EnsureThread();
+            Diagnostics.Log("PopupAutoYes: 借用生效 " + token.Tag + "（在借 " + after + " 笔）");
+            return token;
+        }
+
+        /// <summary>
+        /// 强制收回所有在借凭据（工具窗关闭时调用）：先关引擎，再把没还的全列进日志。
+        /// 被收回的 token 之后 Dispose 是空操作 —— 窗口都没了，不该再冒出一段收尾巡检。
+        /// </summary>
+        public static void ReleaseAll(string why)
+        {
+            string left;
+            lock (_borrowSync)
+            {
+                left = JoinBorrows();
+                foreach (BorrowToken t in _borrows) t.MarkStale();
+                _borrows.Clear();
+            }
+            _enabled = false;
+            if (left == "(无)")
+            {
+                Diagnostics.Log("PopupAutoYes: 强制收回（" + why + "）—— 当时没有在借凭据");
+                return;
+            }
+            Diagnostics.Log("PopupAutoYes: 强制收回（" + why + "），在借未还 " + left +
+                            " —— 这些流程漏了归还，正常路径应当用 using/finally 补回");
+        }
+
+        /// <summary>当前在借的凭据列表（供状态行/取证日志点名漏还的流程）。</summary>
+        public static string OutstandingBorrows
+        {
+            get { lock (_borrowSync) { return JoinBorrows(); } }
+        }
+
+        private static string JoinBorrows()
+        {
+            return _borrows.Count == 0 ? "(无)" : string.Join(" | ", Array.ConvertAll(_borrows.ToArray(), t => t.Tag));
+        }
+
+        private sealed class BorrowToken : IDisposable
+        {
+            internal readonly string Tag;
+            internal readonly long Epoch;   // 借出时的 FlowGate 流程代号：不同号 = 上一流程漏还
+            private readonly string _why;
+            private readonly int _tailMs;
+            private int _returned;    // 0=在借 1=已还；Dispose 幂等，重复归还不二次记账
+            private int _stale;       // 1=已被 ReleaseAll 收回，Dispose 变空操作
+
+            internal BorrowToken(string tag, string why, int tailMs, long epoch)
+            {
+                Tag = tag; _why = why; _tailMs = tailMs; Epoch = epoch;
+            }
+
+            internal void MarkStale() { Interlocked.Exchange(ref _stale, 1); }
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _returned, 1) != 0) return;
+                if (Volatile.Read(ref _stale) != 0) return;
+                bool emptied;
+                int still;
+                lock (_borrowSync)
+                {
+                    _borrows.Remove(this);
+                    emptied = _borrows.Count == 0;
+                    still = _borrows.Count;
+                }
+                if (!emptied)
+                {
+                    Diagnostics.Log("PopupAutoYes: 归还 " + Tag + "，外层还借着 " + still +
+                                    " 笔（" + OutstandingBorrows + "）→ 代点继续");
+                    return;
+                }
+                _enabled = false;
+                Diagnostics.Log("PopupAutoYes: 归还 " + Tag + "，在借归零 → 代点已关，" +
+                                "只留 " + (_tailMs / 1000) + " 秒迟到业务框巡检");
+                WatchLatePopups(_tailMs, _why);
+            }
         }
 
         /// <summary>
@@ -142,8 +294,10 @@ namespace caxa3dcodenameextraction
             return false;
         }
 
-        /// <summary>流程结束后再盯 <paramref name="ms"/> 毫秒的迟到业务框，并当场留一份顶层窗口取证。</summary>
-        public static void WatchLatePopups(int ms, string why)
+        /// <summary>流程结束后再盯 <paramref name="ms"/> 毫秒的迟到业务框，并当场留一份顶层窗口取证。
+        /// ★ 只有 <see cref="BorrowToken.Dispose"/> 在最后一笔归还时调用 —— 外部不许直接开巡检，
+        /// 否则等于绕过借还记账（本项目实测此类"还有个开关能用"就是漏还的来源）。</summary>
+        private static void WatchLatePopups(int ms, string why)
         {
             Volatile.Write(ref _tailUntil, Environment.TickCount + ms);
             Volatile.Write(ref _tailGen, Volatile.Read(ref _tailGen) + 1);
@@ -268,6 +422,7 @@ namespace caxa3dcodenameextraction
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextW(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT
@@ -314,6 +469,12 @@ namespace caxa3dcodenameextraction
 
                 string cls = GetClass(h);
                 string title = GetText(h);
+
+                // 本插件自己的 WinForms 窗口当 owner 的公共对话框（OpenFileDialog / SaveFileDialog）：
+                // 那是**问用户**的，代点器一律当它不存在。不挡这一条，「更新3dbom」在需要手工选
+                // exb 的分支里，刚弹出的「选择要更新 3D 明细的图纸」会被后台线程当场点「取消」。
+                // CAXA 自己的框是 MFC 的，owner 永远不是 WindowsForms 窗口 ⇒ 不会误放行。
+                if (cls == "#32770" && OwnerIsOwnUiWindow(h)) return true;
 
                 // 探针自己驱动的两张框（「改变链接文件」/「浏览文件夹」）：
                 // ① 不能只看 cls=="#32770"——MFC 自绘框的窗口类未必是它，漏了状态机就永不推进；
@@ -389,6 +550,7 @@ namespace caxa3dcodenameextraction
                 IntPtr yesBtn = IntPtr.Zero;
                 IntPtr openBtn = IntPtr.Zero;
                 IntPtr cancelBtn = IntPtr.Zero;
+                IntPtr cancelAllBtn = IntPtr.Zero;
                 IntPtr editCtl = IntPtr.Zero;
                 var comboTexts = new List<string>();
                 // 弹窗正文（Static 控件文字）。崩前那张「是(&Y)」只记按钮名等于没取证，
@@ -431,6 +593,7 @@ namespace caxa3dcodenameextraction
                                 if (norm == c) { cancelBtn = h; break; }
                             }
                         }
+                        if (cancelAllBtn == IntPtr.Zero && IsCancelAll(norm)) cancelAllBtn = h;
                     }
                     else if (cls == "Edit" && editCtl == IntPtr.Zero)
                     {
@@ -451,6 +614,22 @@ namespace caxa3dcodenameextraction
                 uint wpid;
                 GetWindowThreadProcessId(dlg, out wpid);
                 string proc = ProcName(wpid);
+
+                // 「指定形文件」= exb 引用了本机找不到的 .shx，打开图纸那一步弹（用户 2026-11-05 截图）。
+                // 这张框上有「确定」，落到下面的通用代点会采用列表里高亮的那个字体（每台机器不一样）；
+                // 框自己的说明写明"点击取消按钮将会使用全局设置中的缺省字体来显示"，
+                // 而「全部取消」是一次管完所有缺字体 ⇒ 只点它，不替用户挑字体。
+                if (cancelAllBtn != IntPtr.Zero &&
+                    (title.IndexOf("指定形", StringComparison.Ordinal) >= 0 ||
+                     BodyHas(staticTexts, "替换此字体")))
+                {
+                    Diagnostics.Log("PopupAutoYes: 点击「全部取消」@「" + title + "」[" + proc +
+                                    "]（缺字体回落全局缺省，不替用户选字体）" + BodySuffix(staticTexts));
+                    PostMessage(cancelAllBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                    Interlocked.Increment(ref _clickCount);
+                    _clickedOnce.Add(dlgKey);
+                    continue;
+                }
 
                 if (yesBtn != IntPtr.Zero)
                 {
@@ -475,6 +654,21 @@ namespace caxa3dcodenameextraction
                         Interlocked.Increment(ref _clickCount);
                         _clickedOnce.Add(dlgKey);
                         continue;
+                    }
+
+                    // 「请更新3D文件位置」：点是之后 CAXA 立刻弹「打开」要人指新 ics，
+                    // 这一句把流程预先布防的路径转交给文件框代填器（不清 Locate3dAfterPrompt
+                    // 会让下一张同名的框也被填上）。
+                    if (BodyHas(staticTexts, "请更新3D文件位置"))
+                    {
+                        string loc = Locate3dAfterPrompt;
+                        if (!string.IsNullOrEmpty(loc))
+                        {
+                            Locate3dAfterPrompt = null;
+                            FileDialogTarget = loc;
+                            Diagnostics.Log("PopupAutoYes: 「请更新3D文件位置」已布防，" +
+                                            "随后的「打开」将指向「" + loc + "」");
+                        }
                     }
 
                     Diagnostics.Log("PopupAutoYes: 点击「" + hitText + "」@「" + title + "」[" + proc + "]" + BodySuffix(staticTexts));
@@ -578,6 +772,18 @@ namespace caxa3dcodenameextraction
 
 
         /// <summary>对话框所属进程是否在代点白名单里（本进程 / CAXADraft）。</summary>
+        /// <summary>这张 #32770 的 owner 是不是本进程的 WinForms 窗口（= 本插件自己弹的问答框）。</summary>
+        private static bool OwnerIsOwnUiWindow(IntPtr dlg)
+        {
+            try
+            {
+                IntPtr owner = GetWindow(dlg, 4);   // GW_OWNER
+                if (owner == IntPtr.Zero) return false;
+                return GetClass(owner).StartsWith("WindowsForms", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
         private static bool IsWatchedProcess(uint pid)
         {
             string name = ProcName(pid);

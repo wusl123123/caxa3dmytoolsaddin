@@ -1,4 +1,7 @@
+// 机械移植自工程 caxa3dexbtracker 的 MsaaAccess.cs（全文件）。仅改 namespace 与项目内资源名，逻辑未动。
 // MSAA（oleacc IAccessible）通道：读写 CAXA 的 BCGControlBar 自绘界面。
+//
+// 机械移植自工程 caxa3dcodenameextraction 的 MsaaAccess.cs（全文件）。仅改 namespace，逻辑未动。
 //
 // 为什么需要它：实机取证（caxa3dcodenameextraction_uiprobe.txt，2026-11-01 12:4x）证明
 // 「替换零件/装配」面板不是 #32770 对话框，「导入零件/装配」「重新附加约束」「约束元素」
@@ -349,18 +352,37 @@ namespace caxa3dcodenameextraction
             sb.AppendLine("OBJID_CLIENT childCount=" + count);
 
             var seen = new List<string>();
+            var zero = new List<string>();      // 零矩形条目：只有名字、没有可点位置，见下方折叠规则
             Budget budget = new Budget();
-            Collect(root, 0, budget, seen);
+            Collect(root, 0, budget, seen, zero);
             int written = 0;
             foreach (string s in seen)
             {
                 if (written++ >= maxLines) { sb.AppendLine("…（其余省略，共 " + seen.Count + " 条）"); break; }
                 sb.AppendLine(s);
             }
+            // 零矩形条目折叠成一行：这些是「位置 / 向上翻页 / 输入法 / 应用程序」这类纯结构节点，
+            // 没有屏幕坐标、不能用来定命中口径。实机 11:48 那张「改变链接文件」的取证块 200 行里
+            // 117 行是它们（其中 95 行整段重复），把真正有矩形的条目埋了。
+            // 名字仍然全部列出（折叠不等于删除证据），但要读的是**有没有目录形状的名字**时，
+            // 那是 Msaa.AllIn 的活（带矩形字段），不靠这份清单。
+            if (zero.Count > 0)
+            {
+                sb.AppendLine("（零矩形条目 " + zero.Count + " 条，无坐标不可命中，折叠在此：" +
+                    JoinNames(zero, 40) + "）");
+            }
             return sb.ToString();
         }
 
-        private static void Collect(IAccessible acc, int depth, Budget budget, List<string> outNames)
+        private static string JoinNames(List<string> names, int max)
+        {
+            var part = new List<string>();
+            for (int i = 0; i < names.Count && i < max; i++) part.Add(names[i]);
+            return string.Join(" | ", part.ToArray()) + (names.Count > max ? " …" : "");
+        }
+
+        private static void Collect(IAccessible acc, int depth, Budget budget,
+                                    List<string> outNames, List<string> outZero)
         {
             if (acc == null || depth > MaxDepth || budget.Left <= 0) return;
             int count;
@@ -384,12 +406,14 @@ namespace caxa3dcodenameextraction
                     use.get_accDefaultAction(childId, out act);
                     int l, t, w, h;
                     use.accLocation(out l, out t, out w, out h, childId);
-                    outNames.Add(new string(' ', depth * 2) + name +
+                    string line = new string(' ', depth * 2) + name +
                         (string.IsNullOrEmpty(act) ? "" : " 动作=[" + act + "]") +
-                        " 矩形=" + l + "," + t + " " + w + "x" + h);
+                        " 矩形=" + l + "," + t + " " + w + "x" + h;
+                    if (w > 0 && h > 0) outNames.Add(line);
+                    else outZero.Add(name);
                 }
                 if (childAcc != null)
-                    Collect(childAcc, depth + 1, budget, outNames);
+                    Collect(childAcc, depth + 1, budget, outNames, outZero);
             }
         }
 

@@ -11,9 +11,6 @@
 > | **WorkBuddy** | 免费积分 |
 > | **Trae** | 免费积分 |
 > | **Qoder** | 免费积分 |
->
-> CAXA 3D 二次开发的全部 API 槽位、坑点结论与验证记录由 AI 工具在真机探针、类型库（TLB）导出与运行日志取证的基础上累积，
-> 详见 `caxa3dmytoolsaddin-项目总结.md`、`plugins/<插件名>/<插件名>-项目总结.md` 与 `C:\code\ICAPI\_probe-tools\README.md`。
 
 CAXA 3D 内置插件集合体（Add-in Host）与统一工具箱。CAXA 3D 中只登记**一个** Add-in，主程序通过契约接口反射加载 `plugins/` 下的多个独立子插件，功能区只保留一个「我的工具箱」按钮。
 
@@ -43,17 +40,17 @@ CAXA 3D 内置插件集合体（Add-in Host）与统一工具箱。CAXA 3D 中�
 | `Caxa3dcudeaddin` | 立方体工具 | 原点建块、vtable 槽位调用、子进程兜底 |
 | `caxa3dAttributeManageraddin` | 自定义属性管理器 | 基于 xlsx 属性表批量读写自定义属性，共享表精确匹配 |
 | `caxa3dcodenameextraction` | 带图改名及图号分离 | 图纸环境 CRX 桥、图号分离、批量改名、弹窗代点 |
-| `caxa3dsetMaterial` | 材料工具 | 材料 / 密度 / 颜色批量设置，色卡与材料资料库 |
-| `caxa3dTreeBom` | 树形BOM | 按装层级构建 BOM 并导出 Excel，合并规则可配 |
+| `caxa3dsetMaterial` | 材料工具 | 材料 / 密度 / 颜色批量设置，色卡与材料资料库；材料分类页签可横向滚动、支持通配符搜索并定位到行 |
+| `caxa3dTreeBom` | 树形BOM | 按装配层级构建 BOM 并导出 Excel，合并规则可配；表头列取值走三通道阶梯（自定义属性共享表 → BOM 导出兜底 → 专用兜底），每格来源可悬停追溯，逐列候选名/开关在 `%APPDATA%\caxa3dTreeBom\caxa3dTreeBom表头字段映射.txt` |
 | `caxa3dminitool` | 小工具合集 | 曲线、元素、特征、内核等调试类小工具 |
 | `caxa3dsheetmaster` | 折弯管理大师 | 钣金折弯数据管理、K 因子计算 |
+| `caxa3dBatchMaster` | 批量大师 | 装配/图纸批量处理：批量改名与图号分离、自定义属性批量写入、3D BOM 更新与表格导出，规则与属性表可外置配置 |
 | `caxa3dCXDFTViewUpdate` | 刷新图纸视图 | 批量打开 exb 图纸刷新视图后保存，图纸环境 CRX 桥 + 弹窗代点 + 后台化 |
-| `caxa3dexbtest` | 图纸环境矩形测试 | 图纸环境 CRX 桥接模块接入样例 |
 | `caxa3dapigetaddin` | 操作 API 抓取器 | 实时抓取用户操作对应的 ICAPI 调用，供二次开发参考 |
-| `caxa3dsetbackup` | 设置备份 | 备份/还原 CAXA 3D 设计环境与图纸环境配置，系统工具列 |
 | `caxa3didcskill` | 后台进程清理 | 独立插件列启动器，拉起进程外的 `caxa3didcskill.exe` 清理无窗口 IRONCAD 残留进程 |
+| `caxa3dexbTechSpecsbak` | 工程图技术要求备份 | 按 CAXA 版本年度备份/还原「我的技术要求」`NSpecLib.xml`，zip 内带清单、逐项 SHA256 校验、还原前自动留 `.bak` |
 
-工具箱窗口按 `IPlugin.Category` 分四列表格排列：`1. 常用插件`（`BuiltIn`，6 个，含 `caxa3dCXDFTViewUpdate`）、`2. 独立插件`（`Independent`，`caxa3didcskill`）、`3. 系统工具`（`SystemTool`，`caxa3dsetbackup` 设置备份）、`4. 测试插件`（`Test`，`Caxa3dcudeaddin`、`caxa3dAttributeManageraddin`、`caxa3dexbtest`、`caxa3dapigetaddin`）。
+工具箱窗口按 `IPlugin.Category` 分四列表格排列：`1. 常用插件`（`BuiltIn`，8 个：`caxa3dAttributeManageraddin`、`caxa3dcodenameextraction`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dminitool`、`caxa3dsheetmaster`、`caxa3dBatchMaster`、`caxa3dCXDFTViewUpdate`）、`2. 独立插件`（`Independent`，`caxa3didcskill`）、`3. 系统工具`（`SystemTool`，`caxa3dexbTechSpecsbak`）、`4. 测试插件`（`Test`，`Caxa3dcudeaddin`、`caxa3dapigetaddin`）。
 
 > 独立插件的形态：`plugins\caxa3didcskill\` 里 DLL 只是**启动器**（不引用 ICAPI、不建窗口、不实现业务逻辑），点单元格时由它启动同目录的 `caxa3didcskill.exe`；已有实例则切前台，不重复启动。进程清理只能在进程外做（规则 16.6），EXE 源码在 `tools\caxa3didcskill\`，随安装包一起部署到 `plugins\caxa3didcskill\`。
 
@@ -63,7 +60,7 @@ CAXA 3D 内置插件集合体（Add-in Host）与统一工具箱。CAXA 3D 中�
 
 ```
 caxa3dmytoolsaddin/
-├── Lib/                           ICApiAddin.snk + interop.ICApiIronCAD.dll
+├── Lib/                           interop.ICApiIronCAD.dll（编译期引用；ICApiAddin.snk 不在仓库，见第四节）
 ├── build.ps1                      一键编译：契约 -> 子插件 -> 主程序，并汇总到 src/plugins
 ├── deploy.ps1  / 安装.bat         一键部署（自动提权）
 ├── restore.ps1 / 卸载.bat         一键卸载（手术式清理，可重复执行）
@@ -80,11 +77,11 @@ caxa3dmytoolsaddin/
     ├── caxa3dTreeBom/
     ├── caxa3dminitool/
     ├── caxa3dsheetmaster/         含 CRX 桥子工程（C++）
+    ├── caxa3dBatchMaster/         批量大师（含 CRX 桥子工程 C++ 与外置规则/属性表资源）
     ├── caxa3dCXDFTViewUpdate/      含 CRX 桥子工程（C++, caxa3dCXDFTViewUpdate.crx）
-    ├── caxa3dexbtest/             含 CRX 桥子工程（C++）
     ├── caxa3dapigetaddin/         含 CRX 桥子工程（C++, caxa3dapicapture.crx）
-    ├── caxa3dsetbackup/           系统工具：配置备份/还原（仅移植内置插件内核）
-    └── caxa3didcskill/            独立插件列启动器（拉起 tools 里的 EXE）
+    ├── caxa3didcskill/            独立插件列启动器（拉起 tools 里的 EXE）
+    └── caxa3dexbTechSpecsbak/     工程图技术要求备份（系统工具列，纯文件 + 注册表操作）
 
 tools/
 └── caxa3didcskill/              独立 EXE：后台进程清理（随包部署到 plugins\caxa3didcskill\）
@@ -245,6 +242,8 @@ public interface IPluginHost
 
 跨插件约定：自定义属性统一写入共享属性表；CAXA COM 调用一律 STA UI 线程。
 
+**表头/列取值阶梯**（`caxa3dTreeBom` 已落地，其他插件按需沿用）：① 自定义属性共享表 → ② BOM 导出兜底 → ③ 专用兜底，三通道都只认非空白值，全空按「读不到」处理。逐列候选名与开关外置在 `%APPDATA%\caxa3dTreeBom\caxa3dTreeBom表头字段映射.txt`（热重载；写 `列名=无` ＝该列只认自定义属性），详见第十节常见问题。
+
 ---
 
 ## 十、常见问题
@@ -264,6 +263,9 @@ public interface IPluginHost
 **界面卡死**
 CAXA COM 被放到后台线程，或长任务缺少 `Application.DoEvents()` 泵。参考铁律 13。
 
+**树形BOM 某列值为空，或显示的不是我填的自定义属性**
+先看单元格悬停提示里的「来源」：`属性`＝自定义属性共享表命中；`BOM:xxx`＝自定义属性没数据、走了 BOM 导出兜底（写明命中的 BOM 名称）；空＝三条通道都没取到（第三态，不是空值）。再看 `%TEMP%\caxa3dTreeBom_trace.log` 的 `ExportSelfBOM labels 全集` 一行（本次运行首个元素全量打印、不截断），据此在 `%APPDATA%\caxa3dTreeBom\caxa3dTreeBom表头字段映射.txt` 为该列写显式候选名；不想要兜底就写 `列名=无`，保存即生效（按文件时间热重载，不必重启 CAXA）。日志区那行 `🧭 取值来源（数据列 N 个｜共 M 行）：属性 X/N 列｜BOM 兜底 Y/N 列…` 带分母，可先判断是个别格还是整列走了兜底。
+
 **后台 IRONCAD 进程抢连接**
 CAXA 常驻若干无窗口后台进程，与前台进程同名。连接前清空同名无窗口进程再抓取；迁移后由 `tools\caxa3didcskill\caxa3didcskill.exe` 独立完成（进程内 addin 不做进程清理）。
 
@@ -273,10 +275,9 @@ CAXA 常驻若干无窗口后台进程，与前台进程同名。连接前清空
 
 | 文件 | 内容 |
 | --- | --- |
-| `AGENTS.md` | AI/开发者上手约定：构建入口、不可违背的契约、COM 调用规则、交付前验证清单 |
-| `caxa3dmytoolsaddin-项目总结.md` | 集合体架构、部署与跨插件铁律、里程碑 |
-| `caxa3dmytoolsaddin-需求文件.txt` | 原始需求与架构约定 |
-| `plugins/<插件名>/<插件名>-项目总结.md` | 各子项目的实现细节、踩坑记录与验证结果 |
+| `AGENTS.md` | 项目合并与发布流程：双远端分支约定、推送方式、不入库清单、发布核对单 |
+
+开发规范、API 契约与各项目踩坑记录仅保留在本地，不入库。
 
 ---
 

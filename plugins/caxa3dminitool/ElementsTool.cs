@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using interop.ICApiIronCAD;
 
 namespace caxa3dminitool
@@ -13,6 +14,8 @@ namespace caxa3dminitool
     ///                     → 元素 QI 到 IZSizeBox 后 Reset(false)
     ///  3) 全选内部链接零件 ← IPROShapeUtils.ShapeUtils::OnDragDropSelectLinkedElements
     ///                     → IZSceneElement.HasInternalLinks / GetInternallyLinkedElements 扫描 + 选中
+    ///  4) 选择相同零部件   ← ICAPI 无对应单接口（ICM 三张映射表与命令索引里均无「按同名选择」）
+    ///                     → 自建：选中件取零件名 → CollectAllElements 穿透全树 → 同名零部件 → SelectionMgr 选回
     /// 成功判定统一走业务侧回读（压缩状态 / 包围盒尺寸 / 选区数量），不看 API 返回值。
     /// </summary>
     internal static class ElementsTool
@@ -282,9 +285,189 @@ namespace caxa3dminitool
             return linked.Count;
         }
 
+        // ================================================================ 4) 选择相同零件名的零部件
+
+        /// <summary>
+        /// 以当前选中的零部件为种子，穿透整棵设计树，把零件名（IZElement.Name，槽 9）相同的零部件全部选回。
+        /// ICAPI 没有「按同名选择」的单接口，本功能 = 全树遍历 + 名字比对 + SelectionMgr 写入。
+        /// 权威判据 = 选区回读命中数（CountSelectedIn）；命中数与走查数一并写日志。
+        /// 首轮取证目标：**同名是否等于同模型**——故对每个命中件再读一次外链文件名，
+        /// 一张装配里若「同名但不同 ics」或「同 ics 却不同名」，日志一眼可见。
+        /// </summary>
+        public static int SelectSameNameComponents(IZBaseApp app, out string error,
+            out string summary, out int selectedAfter)
+        {
+            error = null;
+            summary = "";
+            selectedAfter = 0;
+            int walked = 0;
+
+            IZSceneDoc scene = FeatureTool.GetSceneDoc(app);
+            if (scene == null)
+            {
+                error = "当前活动文档不是设计（场景）环境，请切回 3D 设计环境后再试。";
+                return 0;
+            }
+
+            IZSelectionMgr sel = GetSelectionMgr(scene);
+            if (sel == null)
+            {
+                error = "取不到 SelectionMgr。";
+                return 0;
+            }
+
+            List<IZElement> seeds = FeatureTool.GetSelection(app, out _);
+            if (seeds.Count == 0)
+            {
+                error = "当前没有选中的零部件：请在设计树或图形区点中一个零件/装配体，再按「选择相同零部件」。";
+                return 0;
+            }
+
+            // 种子名：多选就并集；非零部件类型（特征/草图/面/场景根）一律不当种子
+            List<string> nameList = new List<string>();
+            foreach (IZElement seed in seeds)
+            {
+                if (!IsComponentKind(seed)) continue;
+                string n = SafeName(seed);
+                if (n.Length == 0 || n == "?") continue;
+                if (!nameList.Contains(n)) nameList.Add(n);
+            }
+
+            if (nameList.Count == 0)
+            {
+                error = "选中的不是零部件（零件/装配体/钣金/刻面/线框/轮廓之外的类型），请把选择放到设计树的零部件节点上。当前选中："
+                        + JoinNames(seeds, 4);
+                return 0;
+            }
+
+            List<IZElement> hits = new List<IZElement>();
+            HashSet<IZElement> seen = new HashSet<IZElement>();
+            foreach (IZElement elem in CollectAllElements(scene))
+            {
+                walked++;
+                if (!IsComponentKind(elem)) continue;
+                if (!nameList.Contains(SafeName(elem))) continue;
+                if (seen.Add(elem)) hits.Add(elem);
+            }
+
+            Diagnostics.Log(string.Format("选择相同零部件：种子名 [{0}]，走查 {1} 个元素，同名零部件 {2} 个（{3}）",
+                string.Join("、", nameList.ToArray()), walked, hits.Count,
+                hits.Count == 0 ? "无" : JoinNames(hits, 8)));
+
+            if (hits.Count == 0)
+            {
+                summary = string.Format("种子名 [{0}] 穿透全树后没有同名零部件（走查 {1} 个元素）",
+                    string.Join("、", nameList.ToArray()), walked);
+                return 0;
+            }
+
+            Diagnostics.Log("选择相同零部件取证（按外链文件分组）：" + GroupByLinkFile(hits));
+
+            try
+            {
+                sel.RemoveAllFromSelection();
+                foreach (IZElement elem in hits) sel.AddElementToSelection(elem, true);
+                selectedAfter = CountSelectedIn(sel, hits);
+            }
+            catch (Exception ex)
+            {
+                error = "选中同名零部件失败：" + ex.Message;
+            }
+
+            summary = string.Format("种子名 [{0}]：命中 {1} 个同名零部件，选区回读 {2} 个（走查 {3} 个元素）",
+                string.Join("、", nameList.ToArray()), hits.Count, selectedAfter, walked);
+            return hits.Count;
+        }
+
+        /// <summary>
+        /// 零部件类型口径（eZElementType，与技能 03-com-api 第 7 节同）：
+        /// 零件 1 / 装配体 2 / 钣金零件 20 / 刻面零件 25 / 线框零件 28 / 轮廓零件 29；
+        /// 场景根 0、特征族、草图/轮廓容器一律不算零部件。
+        /// </summary>
+        internal static bool IsComponentKind(IZElement elem)
+        {
+            if (elem == null) return false;
+            try
+            {
+                switch (elem.Type)
+                {
+                    case eZElementType.Z_ELEMENT_PART:
+                    case eZElementType.Z_ELEMENT_ASSEMBLY:
+                    case eZElementType.Z_ELEMENT_SHEETMETAL_PART:
+                    case eZElementType.Z_ELEMENT_FACET_PART:
+                    case eZElementType.Z_ELEMENT_WIRE_PART:
+                    case eZElementType.Z_ELEMENT_PROFILE_PART:
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.Trace("IsComponentKind failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 零部件的外链文件名基名（虚拟件/取失败返回空串）。
+        /// 装配体走 IZAssembly、其余走 IZPart，两者同名方法 GetExternallyLinkedInfo(out bool)。
+        /// </summary>
+        private static string LinkFileBaseName(IZElement elem)
+        {
+            bool linked;
+            string path = LinkedFilePath(elem, out linked);
+            if (!linked || string.IsNullOrEmpty(path)) return "";
+            return Path.GetFileNameWithoutExtension(path);
+        }
+
+        /// <summary>
+        /// 零部件外链文件的**全路径**（虚拟件/取失败返回空串，linked=false）。
+        /// 「零件置换」要用它：「A」（先选中、提供模型的那个）的外链路径就是要填进原生「导入零件/装配」文件框的目标。
+        /// </summary>
+        internal static string LinkedFilePath(IZElement elem, out bool linked)
+        {
+            linked = false;
+            try
+            {
+                bool ok;
+                string path;
+                IZAssembly asm = elem as IZAssembly;
+                if (asm != null) path = asm.GetExternallyLinkedInfo(out ok);
+                else
+                {
+                    IZPart part = elem as IZPart;
+                    if (part == null) return "";
+                    path = part.GetExternallyLinkedInfo(out ok);
+                }
+                linked = ok;
+                return path ?? "";
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>命中件按「外链文件基名」分组计数；无链的归到虚拟件一组。</summary>
+        private static string GroupByLinkFile(List<IZElement> hits)
+        {
+            List<string> keys = new List<string>();
+            List<int> counts = new List<int>();
+            foreach (IZElement elem in hits)
+            {
+                string key = LinkFileBaseName(elem);
+                if (string.IsNullOrEmpty(key)) key = "（虚拟件）";
+                int at = keys.IndexOf(key);
+                if (at < 0) { keys.Add(key); counts.Add(1); }
+                else counts[at] = counts[at] + 1;
+            }
+
+            List<string> text = new List<string>();
+            for (int i = 0; i < keys.Count; i++) text.Add(keys[i] + "×" + counts[i]);
+            return string.Join(" | ", text.ToArray());
+        }
+
         // ================================================================ 公共小工具
 
-        private static IZSelectionMgr GetSelectionMgr(IZSceneDoc scene)
+        internal static IZSelectionMgr GetSelectionMgr(IZSceneDoc scene)
         {
             try
             {
@@ -322,7 +505,7 @@ namespace caxa3dminitool
             return matched;
         }
 
-        private static void AppendAll(object raw, List<IZElement> list, HashSet<IZElement> seen, int depth)
+        internal static void AppendAll(object raw, List<IZElement> list, HashSet<IZElement> seen, int depth)
         {
             if (raw == null || depth > 40) return;
 

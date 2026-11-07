@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MiniToolboxBridge —— CAXA 3D 图纸环境 CRX 桥接模块（caxa3dmytoolsaddin \ 小工具合集子插件版）
+     职责：**只做 C# ↔ 图纸环境的联系通道**。随 CAXADraft 自动加载（登记 CxAutorun.cx），
+           加载只做准备（marker + 清残留 + 会话令牌 + 桥定时器），**不建 UI、不注册命令、不自主执行**；
+           运行期只被动等 C# 的 PING / SCAN_LAYOUTS / DELETE_LAYOUTS_EXCEPT_MODEL / EXEC_NATIVE。
+     来源：独立 Add-in caxa3dminitool\Bridge\MiniToolBridge 复制而来。
+           本机同时装着独立版（MiniToolBridge.crx）与集合体版，**同名同前缀会让两个桥抢同一个
+           request 文件**，所以整套改名：产物 caxa3dminitool.crx、临时文件名 caxa3dminitool_sub_ 前缀、
+           模块/窗口类 MiniToolboxBridge*、工程 GUID 全新。seq 与令牌因此天然隔离。
+     编译：plugins\caxa3dminitool\Bridge\build.ps1  或  直接 MSBuild /p:Configuration=Release /p:Platform=x64
+     注意：代理环境变量同时存在 http_proxy 与 HTTP_PROXY 时，MSBuild 会在 CL.exe 启动阶段抛
+           MSB6001（StringDictionary 重复键），编译前先清掉一组。 -->
+<Project DefaultTargets="Build" ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectName>MiniToolboxBridge</ProjectName>
+    <ProjectGuid>{47F9F631-8D8D-4ED5-BF0C-CA6115621FC1}</ProjectGuid>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Dynamic</UseOfMfc>
+    <CLRSupport>false</CLRSupport>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetName>caxa3dminitool</TargetName>
+    <TargetExt>.crx</TargetExt>
+    <OutDir>$(ProjectDir)bin\</OutDir>
+    <IntDir>$(ProjectDir)obj\</IntDir>
+    <!-- CAXA 3D 2027 官方 CRX SDK（2024 共用同一套 ABI） -->
+    <CaxaCrxSdk>C:\Program Files\CAXA\CAXA 3D\2027\bin\CAXADraft\CRX</CaxaCrxSdk>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <Optimization>MaxSpeed</Optimization>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <LanguageStandard>stdcpp14</LanguageStandard>
+      <PreprocessorDefinitions>_WIN64;_WINDOWS;MINITOOLBRIDGE_MODULE;NDEBUG;_AFXEXT;_CCRXAPP;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(CaxaCrxSdk)\Inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <!-- 4828：CRX 自带头文件是 GBK，与 /utf-8 冲突；只影响注释里的中文，属噪声 -->
+      <DisableSpecificWarnings>4828;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>StdAfx.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <Link>
+      <LinkDLL>true</LinkDLL>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <TargetMachine>MachineX64</TargetMachine>
+      <AdditionalLibraryDirectories>$(CaxaCrxSdk)\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>Crx.lib;CrxDb.lib;CrxEdApi.lib;CrxGe.lib;CrxGi.lib;CrxUi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <!-- 编译产物两处落盘：工程根（deploy.ps1 取源）+ C# 输出目录 -->
+    <PostBuildEvent>
+      <Command>if not exist "$(ProjectDir)..\bin\x64\Release\net48" mkdir "$(ProjectDir)..\bin\x64\Release\net48"
+copy /Y "$(TargetPath)" "$(ProjectDir)..\caxa3dminitool.crx"
+copy /Y "$(TargetPath)" "$(ProjectDir)..\bin\x64\Release\net48\caxa3dminitool.crx"</Command>
+      <Message>复制 .crx 到工程根与 bin\x64\Release\net48</Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="StdAfx.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="MiniToolboxBridge.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Use</PrecompiledHeader>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="StdAfx.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

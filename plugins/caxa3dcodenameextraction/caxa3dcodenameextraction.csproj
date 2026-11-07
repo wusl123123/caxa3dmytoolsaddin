@@ -54,11 +54,17 @@
     <None Update="caxa3dcodenameextraction使用说明.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="caxa3dsheetsizewriteaddfix.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Dlg3DInfo.ctl-baseline.ini" CopyToOutputDirectory="PreserveNewest" />
-    <!-- 图纸环境预热的载体图纸（冷启动 OpenFile2 会崩，预热只能靠这张 exb 把图纸环境焐热） -->
-    <None Update="caxa3d图纸环境预热.exb" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 图纸环境预热的载体图纸（冷启动 OpenFile2 会崩，预热只能靠这张 exb 把图纸环境焐热）
+         2026-11-04：基准 = 集合体项目根目录那份，Link 引用，插件目录不再存副本（本目录此前一直没有该文件 ⇒ 原 Update 静默不复制） -->
+    <None Include="$(MSBuildProjectDirectory)\..\..\caxa3d图纸环境预热.exb"
+          Link="caxa3d图纸环境预热.exb"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('$(MSBuildProjectDirectory)\..\..\caxa3d图纸环境预热.exb')" />
     <None Update="ExbLinkPatch.exe" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="register-crx.ps1" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="unregister-crx.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 2026-11-05：脚本名带项目名前缀，和 MainForm.RunCrxScript 里 FindResource 找的名字一致
+         （原来叫 register-crx.ps1 / unregister-crx.ps1，界面「注册CRX/卸载CRX」按钮永远找不到脚本） -->
+    <None Update="caxa3dcodenameextraction-register-crx.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="caxa3dcodenameextraction-unregister-crx.ps1" CopyToOutputDirectory="PreserveNewest" />
     <None Update="caxa3dcodenameextraction-crx\bin\caxa3dcodenameextraction.crx"
           Link="caxa3dcodenameextraction.crx"
           CopyToOutputDirectory="PreserveNewest" />

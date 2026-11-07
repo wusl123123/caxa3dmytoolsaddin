@@ -48,4 +48,11 @@
     <None Include="坐标数据示例.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- 图纸环境 CRX 桥（「删除所有布局(除模型)」的执行体）：
+       源码在 Bridge\，产物 caxa3dminitool.crx 放本目录；build.ps1 的 Extra 与
+       deploy.ps1 的 $crxItems 都要登记 .crx，否则暂存/装机阶段会静默缺件。 -->
+  <ItemGroup>
+    <None Include="caxa3dminitool.crx" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

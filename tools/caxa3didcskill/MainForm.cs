@@ -133,8 +133,13 @@ namespace caxa3didcskill
                 }
                 else
                 {
-                    lblStatus.Text = DateTime.Now.ToString("HH:mm:ss") + " " + result.Summary();
+                    lblStatus.Text = DateTime.Now.ToString("HH:mm:ss") + " " + result.SummaryShort();
                     Diagnostics.Log(source + "完成：" + result.Summary());
+                    if (result.StuckExiting.Count > 0)
+                    {
+                        Diagnostics.Log("注意：「卡在退出」＝系统已给出退出码但进程仍在进程表里，杀进程对它无效，"
+                            + "详见上面每个 pid 的取证行。");
+                    }
                 }
             }
             catch (Exception ex)

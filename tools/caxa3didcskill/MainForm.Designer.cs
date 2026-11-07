@@ -135,6 +135,7 @@ namespace caxa3didcskill
             //
             // lblStatus
             //
+            this.lblStatus.AutoEllipsis = true;
             this.lblStatus.ForeColor = System.Drawing.Color.DimGray;
             this.lblStatus.Location = new System.Drawing.Point(16, 20);
             this.lblStatus.Name = "lblStatus";

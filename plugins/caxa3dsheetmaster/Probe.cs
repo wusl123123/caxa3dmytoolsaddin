@@ -332,7 +332,8 @@ namespace caxa3dsheetmaster
                 }
                 var f = (FnGetObjBool)Marshal.GetDelegateForFunctionPointer(fn, typeof(FnGetObjBool));
                 IntPtr pMgr;
-                int hr = f(pElem, 0, out pMgr);
+                // 共享表铁律（规则 14.7/14.9）：vbShared=TRUE（-1）取共享表；原来传 0 读到的是零件级表。
+                int hr = f(pElem, -1, out pMgr);
                 if (hr != 0 || pMgr == IntPtr.Zero)
                 {
                     sb.AppendLine(string.Format("    [自定义属性] {0}：hr=0x{1:X}（无）", tag, hr));
@@ -344,6 +345,14 @@ namespace caxa3dsheetmaster
                 if (mgr == null)
                 {
                     sb.AppendLine("    [自定义属性] " + tag + "：接口转换失败（IZCustomPropMgr）");
+                    return;
+                }
+                // 参数名义不算判据，仍要 IsSharedMgr()==true 才继续读
+                bool sharedTable = false;
+                try { sharedTable = mgr.IsSharedMgr(); } catch { }
+                if (!sharedTable)
+                {
+                    sb.AppendLine("    [自定义属性] " + tag + "：IsSharedMgr=false，按共享表铁律不读其它表");
                     return;
                 }
                 int count = mgr.Count;

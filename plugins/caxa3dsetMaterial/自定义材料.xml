@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- caxa3dsetMaterial 材料资料库：界面表格直接读写本文件 -->
+<!-- caxa3dsetMaterial 材料库：界面表格直接读写本文件 -->
 <!-- 字段：category=分类 name=材料名 density=密度(kg/m³) color=颜色(RRGGBB) favorite=1 常用 -->
 <!-- 物理量(对应材料页“属性”表)：model=模型类型 desc=描述 ex=弹性模量(N/m²) nuxy=泊松比 gxy=抗剪模量(N/m²) alpx=热膨胀系数(/K) kx=热导率(W/mK) c=比热(J/kgK) sigxt=抗拉强度(N/m²) sigyld=屈服强度(N/m²) sigxc=抗压强度(N/m²) -->
 <MaterialDB version="2">

@@ -619,30 +619,28 @@ namespace caxa3dcodenameextraction
         /// <summary>
         /// 获取元素上的“共享”CustomPropMgr。
         /// 优先走 GetCustomPropManager(selector)+IsSharedMgr 校验；
-        /// 都拿不到共享管理器时回退 get_CustomPropMgr(vbShared=TRUE)。
+        /// 共享表铁律（规则 14.7/14.9）：候选表一律先经 IsSharedMgr()==true 确认，
+        /// 确认不了就返回 Zero 并写日志——绝不拿未确认的表凑数，也不按属性名猜表。
         /// </summary>
         private static IntPtr GetSharedCustomPropMgr(IntPtr pElem, string tag)
         {
-            IntPtr firstFallback = IntPtr.Zero;
             foreach (int selector in new int[] { 0, 1 })
             {
                 IntPtr pMgr = TryGetCustomPropManager(pElem, selector, tag);
                 if (pMgr == IntPtr.Zero) continue;
                 if (TryIsSharedMgr(pMgr, tag + ",selector=" + selector)) return pMgr;
-                if (firstFallback == IntPtr.Zero) firstFallback = pMgr;
-                else Marshal.Release(pMgr);
+                Marshal.Release(pMgr);
             }
-            // 回退路径：旧属性 getter（多数机器可用）
+            // 回退路径：旧属性 getter（vbShared=TRUE）；名义不算判据，同样要 IsSharedMgr 确认
             IntPtr pProp = GetCustomPropMgr(pElem, -1, tag);
             if (pProp != IntPtr.Zero)
             {
-                if (firstFallback != IntPtr.Zero) Marshal.Release(firstFallback);
-                return pProp;
+                if (TryIsSharedMgr(pProp, tag + ",vbShared=true")) return pProp;
+                Marshal.Release(pProp);
             }
-            if (firstFallback != IntPtr.Zero)
-                Diagnostics.Log("GetSharedCustomPropMgr(" + tag + "): 两个主路径均未确认共享，" +
-                    "使用 GetCustomPropManager 返回的第一个管理器");
-            return firstFallback;
+            Diagnostics.Log("GetSharedCustomPropMgr(" + tag + "): 三个候选都没有 IsSharedMgr=true，" +
+                "按共享表铁律本次不读写任何其它表");
+            return IntPtr.Zero;
         }
 
         /// <summary>
@@ -2727,13 +2725,14 @@ namespace caxa3dcodenameextraction
             bool icsClosedByUs = false;
             bool alreadyInLinkedDoc = false;
             bool prodFlow = (opt != null);
+            IDisposable autoClick = null;   // 代点引擎的租约：只在正式流程借，finally 必还
             try
             {
                 if (prodFlow)
                 {
                     // 正式流程：整个流程期间允许代点（exb 与 ics 的「是/确定」弹窗）
                     PopupAutoYes.FileDialogTarget = null;
-                    PopupAutoYes.Enabled = true;
+                    autoClick = PopupAutoYes.Borrow("钣金件设默认");
                 }
                 // ---- 1. 保存原始活动文档 + 检测当前是否已在目标链接文档 ----
                 {
@@ -3053,6 +3052,12 @@ namespace caxa3dcodenameextraction
                                 {
                                     // 计算期望名："展开" + 成品件名
                                     string expectedFlatName = "展开" + r.SelectedName;
+                                    // 2026-11-05 13:2x 实机：成品件名本身带「展开」（外链里当前配置不是默认的
+                                    // 钣金件在设计树里就是这种名字）时，这个名字会变成「展开展开…」。
+                                    // 只点名、不改判据 —— 宿主 Unfold 自己给出的也是同一个串。
+                                    if (r.SelectedName.StartsWith("展开", StringComparison.Ordinal))
+                                        log("⚠ 成品件名本身已带「展开」前缀 ⇒ 展开件名将叫 \"" + expectedFlatName +
+                                            "\"（双前缀，源数据如此，本流程不改判据）");
                                     log("→ 展开成功，显式设置展开件名为：\"" + expectedFlatName + "\"");
 
                                     IntPtr pFlatNew = CallGetObj(pSm, SlotSmGetFlatPart,
@@ -3279,8 +3284,8 @@ namespace caxa3dcodenameextraction
 
                 if (prodFlow)
                 {
-                    PopupAutoYes.Enabled = false;
                     PopupAutoYes.FileDialogTarget = null;
+                    if (autoClick != null) autoClick.Dispose();   // 归零时代点关闭，只留迟到框巡检
                 }
                 // 无论成败都必须解除挂起，否则下次流程的 exb 弹窗永远不会被代点
                 PopupAutoYes.Suspend = false;

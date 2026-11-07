@@ -50,6 +50,12 @@ namespace caxa3dTreeBom
         /// <summary>按列表头名称抓取到的属性值（键忽略大小写）。</summary>
         public Dictionary<string, string> Properties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>与 Properties 平行的「取值来源」表（键＝表头显示名，值＝来源串）。
+        /// 词表四种形态（与 ColumnSourceUi 的解析口径一致，别自创）：
+        /// "属性"＝自定义属性共享表命中；"BOM:命中标签"＝BOM 导出兜底命中；"专用:专用词"＝原有专用兜底；
+        /// 空串＝三条通道均未取到（第三态，与「取到但是空白」分开记）。</summary>
+        public Dictionary<string, string> Sources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>装配体在该节点的数量累计系数（父级累计 × 本层数量），用于汇总总数量。</summary>
         internal int Multiplicity = 1;
 
