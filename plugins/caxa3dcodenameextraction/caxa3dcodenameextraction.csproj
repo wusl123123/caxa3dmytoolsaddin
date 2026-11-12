@@ -41,11 +41,8 @@
       <HintPath>Lib\interop.ICApiIronCAD.dll</HintPath>
       <EmbedInteropTypes>True</EmbedInteropTypes>
     </Reference>
-    <!-- CreateCommandHandler 按钮图标参数类型（来自 GAC 的 PIA，与官方样例一致） -->
-    <Reference Include="stdole, Version=7.0.3300.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-      <HintPath>C:\Windows\assembly\GAC\stdole\7.0.3300.0__b03f5f7f11d50a3a\stdole.dll</HintPath>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </Reference>
+    <!-- v1.1 结构对齐（2026-11-12）：stdole 引用已删——子插件不注册 Ribbon 按钮，
+         CreateCommandHandler 图标通道整条退役，图标参数固定 null, null（规则铁律 4） -->
   </ItemGroup>
 
   <!-- 运行期资源随编译拷到输出目录：规则/说明/控件基线/CRX 注册脚本/CRX 桥本体 -->

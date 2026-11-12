@@ -324,7 +324,7 @@ namespace caxa3dBatchMaster
                         case PeekAlready:
                             _rowsSkipped++; _already++; NextRow(dlg); break;
                         case PeekChange:
-                            Advance(_peekDir == DirYes ? StageFile : StageFolder);
+                            Advance(StageFolder);   // 两列都改：先补「在文件夹」（idempotent），再改「文件名」全路径
                             break;
                         default:                        // PeekFolderOnly
                             Advance(StageFolder); break;
@@ -553,34 +553,17 @@ namespace caxa3dBatchMaster
                 Say("    对不上号" + (cur.Length == 0 ? "（现值读不到，更不敢动）" : "") +
                     "：那是图纸里**别的**外链，本行两列都不碰");
             }
-            else if (sameName && _peekDir == DirYes)
-            {
-                _peek = PeekAlready;
-                Say("    本行已经指向目标文件，不动它");
-            }
-            else if (sameName && _peekDir == DirUnknown && _dirChannelDead)
-            {
-                // 「在文件夹」已经补齐（文件名走全路径，链接按全路径生效），而目录列的四条读值通道
-                // 本轮已证明取不到值 —— 再为这种行点一次「在文件夹」→「浏览文件夹」→「确定」，
-                // 既验证不了，也只是往 CAXA 上多叠三下无效操作（实机 14:54:55/14:56:56 每行 1.3 秒）。
-                _peek = PeekAlready;
-                Say("    文件名已经对，目录列四条通道全空（本轮已判死）—— " +
-                    "这一行本来就是对的，不再补「在文件夹」，直接下一行");
-            }
-            else if (sameName)
-            {
-                // 目录实测不一致 → 必须补；读不到但通道还没判死 → 按 C-2 补一次并顺带验证。
-                _peek = PeekFolderOnly;
-                Say(_peekDir == DirNo
-                    ? "    文件名已经对，文件夹实测不是目标目录 —— 只补「在文件夹」，不碰文件名"
-                    : "    文件名已经对，文件夹" + DirBlindNote() + " —— 按规范仍补一次「在文件夹」，" +
-                      "但不再为验证单开一张「打开」");
-            }
             else
             {
+                // 本件：两列都按目标补齐。**多行场景每一行都要更新「在文件夹」和「文件名」**，
+                // 不再靠"文件名已经对"或"目录列读不到"来偷懒跳过 —— 目录列本就几乎读不到值
+                // （本轮已判死），若据此跳过，会让"文件名已对、目录仍是旧位置"的行漏改，链接断掉。
+                // 认行只靠文件名（不看目录，目录正是要改的列），避免把该修的行判成"别人的行"。
                 _peek = PeekChange;
-                Say("    同源旧名，本行要改" + (_peekDir == DirYes ? "：目录实测已在目标，只改文件名"
-                                                   : "：两列都要改"));
+                Say("    同源/同名，本行两列都要改（文件名=全路径 " + _fileBase +
+                    "，在文件夹=" + _folder + "）" + (_peekDir == DirYes
+                        ? "：目录实测已对，仍再补一次保证一致"
+                        : "：目录实测不对/读不到，必须补"));
             }
         }
 

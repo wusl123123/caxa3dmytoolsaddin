@@ -335,20 +335,20 @@ function Get-CaxaVersionDirs {
 # 三张表必须等长且顺序对应（下标 i 的 DLL / 名 / CLSID 描述同一个旧插件）。
 # 2026-11-07 补入 caxa3dBatchMaster：独立 Add-in 若仍登记就抢在集合体前面被加载，
 # LoadFrom 返回的是已加载那份（同为 1.0.0.0 / PKT 56647e1eee90f6d4）⇒ 工具箱静默缺席。
-$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll')
-$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster')
-$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}')
+# 2026-11-09 补入 caxa3dButton：按钮工具移植为子插件，独立 Add-in 若仍登记会与集合体重复弹窗。
+$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll')
+$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton')
+$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}')
+
+# 已移出集合体的图纸环境 CRX 桥：部署时清掉 CAXADraft\bin 旧文件与 CxAutorun.cx 旧登记行
+$removedCrxs = @('caxa3dminitool.crx', 'caxa3dapigetaddin.crx')
 
 # 图纸环境 CRX 桥：插件目录 -> 随包 .crx（[3b/5] 逐个拷进 CAXADraft\bin 并登记 CxAutorun.cx）
 $crxItems = @(
     @{ Crx = 'caxa3dcodenameextraction.crx'; Plugin = 'caxa3dcodenameextraction' },
     @{ Crx = 'caxa3dCXDFTViewUpdate.crx';    Plugin = 'caxa3dCXDFTViewUpdate' },
-    # 小工具合集「删除所有布局(除模型)」的执行体。
-    # ★ 与独立 Add-in 的 MiniToolBridge.crx 是两套东西（临时文件名前缀 caxa3dminitool_sub_ vs
-    #   caxa3dminitool_），同机共存不会互相取走对方的请求；两个 crx 各自登记各自的 CxAutorun 行。
-    @{ Crx = 'caxa3dminitool.crx';           Plugin = 'caxa3dminitool' },
     # 批量大师「刷新工程图 / 图号分离（图纸链）」的执行体（11-07 随插件迁入集合体）。
-    # 临时文件名前缀 caxa3dBatchMaster_（ViewBridge.Prefix），与 codenameextraction / minitool 互不冲突。
+    # 临时文件名前缀 caxa3dBatchMaster_（ViewBridge.Prefix），与 codenameextraction 互不冲突。
     @{ Crx = 'caxa3dBatchMasterView.crx';    Plugin = 'caxa3dBatchMaster' }
 )
 
@@ -805,7 +805,32 @@ foreach ($v in $versions) {
         }
     }
 
-    # ---------- 3c. 「2. 独立插件」列的后台进程清理工具 ----------
+    # ---------- 3c. 已下线的图纸环境 CRX 桥清理（文件 + CxAutorun.cx 旧登记行） ----------
+    foreach ($stale in $removedCrxs) {
+        $staleBin = Join-Path $crxBinDir $stale
+        if (Test-Path $staleBin) {
+            try {
+                Remove-Item $staleBin -Force -ErrorAction Stop
+                Write-Host "[3b/5] 已清除已下线 CRX 桥：$staleBin"
+            } catch {
+                Write-Host "[3b/5] 警告：旧 CRX 清理失败 $stale -> $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+        if (Test-Path $crxAutorun) {
+            try {
+                $cx = [IO.File]::ReadAllText($crxAutorun)
+                $cleaned = (($cx -split "`r?`n") | Where-Object { $_ -notlike "*$stale*" }) -join "`r`n"
+                if ($cleaned -ne $cx) {
+                    Write-TextWithBom $crxAutorun $cleaned
+                    Write-Host "[3b/5] 已移除 CxAutorun.cx 旧登记：$stale"
+                }
+            } catch {
+                Write-Host "[3b/5] 警告：CxAutorun.cx 旧登记清理失败 -> $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+    }
+
+    # ---------- 3d. 「2. 系统工具」列的后台进程清理工具 ----------
     # 启动器 DLL 和工具 EXE 都放在 plugins\caxa3didcskill\ 里，[3/5] 已整目录拷贝；
     # 这里只做校验 + 清理早期手工散放在 bin 根目录的旧 EXE（避免两份 EXE 各自为政）。
     $idcDll = Join-Path (Join-Path $pluginDst $idcPluginName) "$idcPluginName.dll"

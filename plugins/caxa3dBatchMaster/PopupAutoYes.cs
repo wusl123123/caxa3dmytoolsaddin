@@ -45,6 +45,12 @@ namespace caxa3dBatchMaster
         /// 不布防就是 11-07 09:23 实机的样子：点是 → 那张「打开」被当无关文件框取消 → 链接永远没更新上。</summary>
         public static volatile string Locate3dAfterPrompt;
 
+        /// <summary>「更新工程图链接文件-V1.1」的拒绝模式标志：置了本标志，打开 exb 弹出的「请更新3D文件位置」
+        /// 就改点「否/取消」（链接保持陈旧），改由后续的「改变链接文件」对话框(代点法)单独修链 —— 即 V1.1 默认修复路径。
+        /// 不置（保底）：本引擎点「是」+文件框布防，链接在打开期就被修好。
+        /// ★ 只在 V1.1 流程借用窗口内置位、finally 里清零，不污染其它流程。</summary>
+        public static volatile bool DeclineUpdate3dLocation;
+
         /// <summary>总代点次数（含「是/确定」「打开」「取消」），ChangeLinksProbe 借此判断「打开」框是否被吃掉了。</summary>
         public static int ClickCount { get { lock (Lock) return _clicked; } }
 
@@ -56,6 +62,38 @@ namespace caxa3dBatchMaster
         /// <summary>挂起：true 时后台线程不代点其它进程的弹窗（图纸已打开、.ics 流程未完成阶段用），
         /// 留给后续阶段统一处理；本插件自家窗口照常。机械照搬参考工程 PopupAutoYes.Suspend 语义。</summary>
         public static volatile bool Suspend;
+
+        // ---- 排除标题（PrintPdfUi 等专用填写器「我自己处理、你别碰」的登记口）----
+        // 命中关键词的 #32770 不进通用代点，避免专用填写器还没填完就被通用代点器抢点。
+        // （移植自 caxa3dexbtracker PopupAutoYes，2026-11-11 pdf 打印对话框链配套）
+        private static readonly HashSet<string> _excludedTitles =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly object _excludedLock = new object();
+
+        /// <summary>加入一个"我自己处理、你别碰"的窗口标题关键词。</summary>
+        public static void AddExcludedTitle(string keyword)
+        {
+            lock (_excludedLock) { _excludedTitles.Add(keyword); }
+        }
+
+        /// <summary>撤回关键词。</summary>
+        public static void RemoveExcludedTitle(string keyword)
+        {
+            lock (_excludedLock) { _excludedTitles.Remove(keyword); }
+        }
+
+        /// <summary>窗口标题是否命中排除关键词（FindTargetDialog 里查）。</summary>
+        private static bool IsExcludedTitle(string title)
+        {
+            if (string.IsNullOrEmpty(title)) return false;
+            lock (_excludedLock)
+            {
+                foreach (string kw in _excludedTitles)
+                    if (title.IndexOf(kw, StringComparison.OrdinalIgnoreCase) >= 0)
+                        return true;
+            }
+            return false;
+        }
 
         /// <summary>探针在后台线程点掉一个框时调它，让 ClickCount 与 _clicked 同步累加（与通用代点共用同一计数器）。</summary>
         public static void CountExternalClick() { lock (Lock) { _clicked++; } }
@@ -182,6 +220,52 @@ namespace caxa3dBatchMaster
                         if (clicked)
                         {
                             string body = BodyText(dlg, 120);
+                            // ---- V1.1：尺寸检查弹窗（改链重新链接 3D 模型触发）----
+                            // 这张框标题含「尺寸检查」，列出失效尺寸。按用户决定点「取消」关闭，
+                            // 不重建/不删失效尺寸（零意外改动，尺寸要不要修全交人工）。绝不能走下面的
+                            // 通用「是/确定」代点（那会触发重建）。
+                            if (title.IndexOf("尺寸检查", StringComparison.Ordinal) >= 0)
+                            {
+                                string cancelText;
+                                IntPtr cancelBtn = FindButtonByTexts(dlg, NoTexts, out cancelText);
+                                if (cancelBtn != IntPtr.Zero)
+                                {
+                                    PostMessage(cancelBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                                    lock (Lock) { _clicked++; }
+                                    _sink("popup: 尺寸检查 → 点「" + cancelText + "」关闭（不重建失效尺寸）(hwnd=0x" +
+                                        dlg.ToInt64().ToString("X") + ")");
+                                }
+                                else
+                                {
+                                    _sink("popup: 尺寸检查弹窗但找不到「取消」按钮，未代点(hwnd=0x" +
+                                        dlg.ToInt64().ToString("X") + ")");
+                                }
+                                continue;   // 这张框无论如何不再走通用「是/确定」代点
+                            }
+
+                            // ---- V1.1：拒绝模式（拒绝打开期弹框）----
+                            // 「请更新3D文件位置」改点「否/取消」，链接保持陈旧，改由「改变链接文件」对话框(代点法)单独修链。
+                            // 优先「否」，回落「取消/关闭」。两种都点不到就放任（不布防、不点「是」），让 CAXA 自己处理。
+                            if (DeclineUpdate3dLocation && body.IndexOf("请更新3D文件位置", StringComparison.Ordinal) >= 0)
+                            {
+                                string noText;
+                                IntPtr noBtn = FindButtonByTexts(dlg, NoTexts, out noText);
+                                if (noBtn != IntPtr.Zero)
+                                {
+                                    PostMessage(noBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                                    lock (Lock) { _clicked++; }
+                                    _sink("popup: V1.1 拒绝「请更新3D文件位置」已点「" + noText +
+                                        "」（链接保持陈旧，改由「改变链接文件」对话框代点法修链）(hwnd=0x" +
+                                        dlg.ToInt64().ToString("X") + ")");
+                                }
+                                else
+                                {
+                                    _sink("popup: V1.1 拒绝模式但找不到「否/取消」按钮，未点这张框" +
+                                        "（链接保持陈旧，留给代点法修链）(hwnd=0x" + dlg.ToInt64().ToString("X") + ")");
+                                }
+                                continue;   // 跳过通用「是」点击，也不布防文件框
+                            }
+
                             // 「请更新3D文件位置」：点是后 CAXA 立刻弹「打开」要人指新 ics。
                             // 必须先布防 FileDialogTarget 再投点击。**布防保持整步有效**：同一个 exb 里
                             // 可能有多条链接都指旧 ics（11-07 第 2 轮 09:44:07 就连弹了第二张），
@@ -363,6 +447,7 @@ namespace caxa3dBatchMaster
                 // 「更新3D明细」是业务对话框：必须由 DlgUpdate3DBom 哨兵先勾「更新」再点确定。
                 // 通用代点器若抢先点「确定」＝提交了一个没勾更新的空表，明细根本不会刷新。
                 string bt = GetWndText(h);
+                if (IsExcludedTitle(bt)) return true;   // 专用填写器登记的框，通用代点让路
                 if (bt.IndexOf("更新", StringComparison.Ordinal) >= 0 &&
                     bt.IndexOf("明细", StringComparison.Ordinal) >= 0) return true;
                 // 探针驱动的两张框（改变链接文件 / 浏览文件夹）与「打开」文件框不在通用代点范围：
@@ -454,6 +539,41 @@ namespace caxa3dBatchMaster
             return n == "是" || n == "确定" || n == "全是" || n == "yes" || n == "ok" ||
                    n == "yestoall" || n == "all" ||
                    n.IndexOf("是到全部", StringComparison.Ordinal) >= 0;
+        }
+
+        /// <summary>「否」类按钮文字（用于「请更新3D文件位置」的拒绝分支，见 <see cref="DeclineUpdate3dLocation"/>）。
+        /// 归一化后形态为「否/no」，再补上「取消/关闭」作为拒绝场景下的等价回落（都＝不更新位置）。</summary>
+        private static readonly string[] NoTexts =
+        {
+            "否(&n)", "否(n)", "否", "no", "&no", "否(&N)", "否(N)",
+            "取消(&c)", "取消(c)", "取消", "cancel", "&cancel", "关闭(&c)", "关闭(c)", "关闭", "close"
+        };
+
+        /// <summary>框内找第一个按钮文字（归一化后）命中任一候选的按钮。用于按需查找「否/取消」等
+        /// （通用「是/确定」已由 <see cref="FindYesLike"/> 负责，本方法不与之重叠）。</summary>
+        private static IntPtr FindButtonByTexts(IntPtr dlg, string[] rawTexts, out string hitText)
+        {
+            var norms = Array.ConvertAll(rawTexts, NormalizeBtn);
+            IntPtr found = IntPtr.Zero;
+            string foundText = "";
+            EnumChildWindows(dlg, delegate(IntPtr h, IntPtr l)
+            {
+                var sb = new StringBuilder(256);
+                GetClassName(h, sb, 256);
+                if (sb.ToString().IndexOf("Button", StringComparison.OrdinalIgnoreCase) < 0) return true;
+                int len = (int)SendMessage(h, WM_GETTEXTLENGTH, IntPtr.Zero, IntPtr.Zero);
+                if (len <= 0 || len > 200) return true;
+                var txt = new StringBuilder(len + 2);
+                SendMessageText(h, WM_GETTEXT, (IntPtr)(len + 1), txt);
+                string n = NormalizeBtn(txt.ToString());
+                for (int i = 0; i < norms.Length; i++)
+                {
+                    if (norms[i] == n) { found = h; foundText = txt.ToString(); return false; }
+                }
+                return true;
+            }, IntPtr.Zero);
+            hitText = foundText;
+            return found;
         }
 
         /// <summary>框正文全文（正文控件是 Static/其他类，不是 Button）。</summary>

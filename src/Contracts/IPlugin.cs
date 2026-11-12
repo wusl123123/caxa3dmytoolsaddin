@@ -4,19 +4,21 @@ namespace Caxa3dMyTools.Contracts
 {
     /// <summary>
     /// 插件归类，决定主工具窗口表格把插件放在哪一列。
+    /// 主窗口自 2026-11-09 起只保留两列（常用 / 系统工具）；
+    /// Independent / Test 仅为兼容保留的枚举值，界面上并入常用列。
     /// </summary>
     public enum PluginCategory
     {
         /// <summary>常用插件（默认归类）：日常业务工具。</summary>
         BuiltIn = 0,
 
-        /// <summary>独立插件：独立 EXE/外部进程方式运行、不依赖站点的工具。</summary>
+        /// <summary>（兼容保留）独立插件：独立 EXE/外部进程方式运行、不依赖站点的工具。</summary>
         Independent = 1,
 
-        /// <summary>测试插件：验证性、诊断性工具。</summary>
+        /// <summary>（兼容保留）测试插件：验证性、诊断性工具。</summary>
         Test = 2,
 
-        /// <summary>系统工具：环境配置备份/还原等系统级工具。</summary>
+        /// <summary>系统工具：环境配置备份/还原、后台进程清理等系统级工具。</summary>
         SystemTool = 3
     }
 
@@ -35,7 +37,7 @@ namespace Caxa3dMyTools.Contracts
         /// <summary>插件显示名（主工具窗口汇总区按钮标题）。</summary>
         string DisplayName { get; }
 
-        /// <summary>插件归类：常用（BuiltIn）、独立（Independent）、系统工具（SystemTool）或测试（Test）。</summary>
+        /// <summary>插件归类：常用（BuiltIn）或系统工具（SystemTool）；其余值界面上并入常用列。</summary>
         PluginCategory Category { get; }
 
         /// <summary>

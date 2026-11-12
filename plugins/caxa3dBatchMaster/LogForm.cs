@@ -5,11 +5,11 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
-using Caxa3dMyTools.Contracts;   // ChordRescue 唯一实现（规则第 37 节）
 
 namespace caxa3dBatchMaster
 {
     /// <summary>独立日志窗口。getLines 提供当前日志行；onClear 清空底层缓冲。</summary>
+using Caxa3dMyTools.Contracts;   // ChordRescue 唯一实现（规则第 37 节）——子插件不迁本地副本
     internal sealed class LogForm : Form
     {
         // ↓↓↓ 键盘归属抢救：日志框是只读 TextBox，Ctrl+A/Ctrl+C 仍要能用（Copy 走托管路径；Cut/Paste 由 ChordRescue 记「只读框，不执行」）。

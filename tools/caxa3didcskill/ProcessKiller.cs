@@ -405,7 +405,8 @@ namespace caxa3didcskill
         }
 
         private static Dictionary<int, Candidate> ScanCandidates(
-            int selfPid, int sessionId, CleanupResult result, Action<string> log, bool verbose)
+            int selfPid, int sessionId, CleanupResult result, Action<string> log, bool verbose,
+            Dictionary<int, DateTime> youngStarts)
         {
             Dictionary<int, List<WindowInfo>> snapshot = CaptureVisibleTopWindows();
             var candidates = new Dictionary<int, Candidate>();
@@ -453,13 +454,16 @@ namespace caxa3didcskill
                         continue;
                     }
 
+                    // 启动保护期的实例必须登记：它可能只是「正在加载」，也可能是「启动即卡死」。
+                    // 只跳过不登记，会让调用方误判成「没有需要清理的后台进程」（用户口径＝查杀失败）。
                     if ((DateTime.Now - start).TotalSeconds < YoungProtectSeconds)
                     {
+                        youngStarts[p.Id] = start;
                         if (verbose)
                         {
-                            result.SkippedYoung++;
                             log(string.Format(
-                                "跳过 pid={0}：启动不足 {1} 秒，可能在加载主窗口", p.Id, YoungProtectSeconds));
+                                "跳过 pid={0}：启动不足 {1} 秒（已运行 {2:0} 秒，尚无可见窗口），暂按启动保护",
+                                p.Id, YoungProtectSeconds, (DateTime.Now - start).TotalSeconds));
                         }
                         continue;
                     }
@@ -477,9 +481,10 @@ namespace caxa3didcskill
             }
 
             if (foreground > result.ProtectedForeground) result.ProtectedForeground = foreground;
+            result.SkippedYoung = youngStarts.Count;
             if (verbose) log(string.Format(
-                "扫描：IRONCAD 进程 {0} 个，保护前台 {1} 个，候选 {2} 个",
-                procs.Length, foreground, candidates.Count));
+                "扫描：IRONCAD 进程 {0} 个，保护前台 {1} 个，启动保护期 {2} 个，候选 {3} 个",
+                procs.Length, foreground, youngStarts.Count, candidates.Count));
             if (verbose) LogIronFamily(snapshot, log);
             return candidates;
         }
@@ -545,6 +550,21 @@ namespace caxa3didcskill
             return "";
         }
 
+        /// <summary>等待启动保护到期：每 3 秒写一行进度（规则 16.1），期间可被停止按钮取消。</summary>
+        private static bool WaitWithProgress(double ms, CancellationToken token, Action<string> log)
+        {
+            double remaining = ms;
+            while (remaining > 0)
+            {
+                double step = Math.Min(3000, remaining);
+                if (token.WaitHandle.WaitOne((int)Math.Round(step))) return false;
+                remaining -= step;
+                if (remaining > 0)
+                    log(string.Format("等待启动保护到期…（剩余 {0:0} 秒）", remaining / 1000));
+            }
+            return true;
+        }
+
         public static CleanupResult Run(CancellationToken token, Action<string> log)
         {
             var result = new CleanupResult();
@@ -556,6 +576,7 @@ namespace caxa3didcskill
 
             // 连续扫描确认：窗口尚未出现的“正在启动”实例需要跨时间观察
             Dictionary<int, Candidate> pending = null;
+            int youngWaitRounds = 0;
             for (int i = 1; i <= ConfirmScans; i++)
             {
                 if (token.IsCancellationRequested)
@@ -565,7 +586,8 @@ namespace caxa3didcskill
                     return result;
                 }
 
-                Dictionary<int, Candidate> scan = ScanCandidates(selfPid, sessionId, result, log, i == 1);
+                var youngStarts = new Dictionary<int, DateTime>();
+                Dictionary<int, Candidate> scan = ScanCandidates(selfPid, sessionId, result, log, i == 1, youngStarts);
 
                 if (pending == null)
                 {
@@ -591,8 +613,55 @@ namespace caxa3didcskill
 
                 if (pending.Count == 0)
                 {
-                    log("没有需要清理的后台进程");
-                    return result;
+                    if (youngStarts.Count == 0)
+                    {
+                        log("没有需要清理的后台进程");
+                        return result;
+                    }
+
+                    // 实测场景（2026-11-07）：CAXA 启动约 20 秒即卡死（进程表里 1 个线程、无可见窗口、
+                    // 父进程已退出），此时用户点「手动运行」。旧逻辑把这种真卡死也当成「正在加载」直接跳过，
+                    // 报「没有需要清理的后台进程」；用户在任务管理器里眼睁睁看着进程还在 ⇒ 判定「查杀失败」。
+                    // 修正：等 60 秒启动保护到期后再判定一次（期间每 3 秒一行进度，可随时停止）；
+                    // 到期后仍无可见窗口就按后台进程清理——这样既不会误杀真正在加载的主窗口实例，
+                    // 也不会把卡死实例漏掉。
+                    if (youngWaitRounds >= 2)
+                    {
+                        log(string.Format(
+                            "本轮不清理：{0} 个实例仍在启动保护期（已等待 {1} 轮），交给下一次自动清理",
+                            youngStarts.Count, youngWaitRounds));
+                        return result;
+                    }
+                    youngWaitRounds++;
+
+                    double remainMs = 0;
+                    var youngText = new List<string>();
+                    foreach (KeyValuePair<int, DateTime> kv in youngStarts)
+                    {
+                        double ms = YoungProtectSeconds * 1000
+                            - (DateTime.Now - kv.Value).TotalMilliseconds + 500;
+                        if (ms > remainMs) remainMs = ms;
+                        youngText.Add(string.Format("pid={0}（已运行 {1:0} 秒）",
+                            kv.Key, (DateTime.Now - kv.Value).TotalSeconds));
+                    }
+                    if (remainMs < 0) remainMs = 0;
+
+                    log(string.Format(
+                        "{0} 处于 {1} 秒启动保护期，等保护到期后再判定（最多再等 {2:0} 秒）；" +
+                        "到期后仍无可见窗口即按后台进程清理",
+                        string.Join("、", youngText.ToArray()), YoungProtectSeconds, remainMs / 1000));
+
+                    if (!WaitWithProgress(remainMs, token, log))
+                    {
+                        result.Canceled = true;
+                        log("已在等待启动保护到期时停止，未杀任何进程");
+                        return result;
+                    }
+
+                    // 保护到期：重开「连续 3 次确认」计数，让刚过保护期的实例走完整判据
+                    i = 0;
+                    pending = null;
+                    continue;
                 }
 
                 if (i < ConfirmScans && token.WaitHandle.WaitOne(ScanIntervalMs))

@@ -159,9 +159,21 @@ namespace caxa3dBatchMaster
             try
             {
                 PopupAutoYes.FileDialogTarget = null;   // 清掉任何上一轮残留
-                // exb 改名后内部 3D 链接仍指旧 ics ⇒ 打开时 CAXA 弹「请更新3D文件位置」，
-                // 点「是」之后紧接着弹「打开」要人指新 ics。先把新 ics 路径布防好，代点器会把它转成文件框目标。
-                PopupAutoYes.Locate3dAfterPrompt = newIcs;
+                // V1.1：是否启用「打开期弹框保底修链」取决于用户开关。
+                // 勾选「拒绝(V1.1)」⇒ 拒绝「请更新3D文件位置」（点 否/取消），让链接保持旧值，
+                //   完全交给后续「改变链接文件」对话框（代点法）单点修链，干净地测通代点法路径。此时不布防文件框。
+                // 不勾 ⇒ 保底模式：点「是」并布防「打开」文件框指向新 ics，打开期就把链接修好。
+                if (!PopupAutoYes.DeclineUpdate3dLocation)
+                {
+                    // exb 改名后内部 3D 链接仍指旧 ics ⇒ 打开时 CAXA 弹「请更新3D文件位置」，
+                    // 点「是」之后紧接着弹「打开」要人指新 ics。先把新 ics 路径布防好，代点器会把它转成文件框目标。
+                    PopupAutoYes.Locate3dAfterPrompt = newIcs;
+                }
+                else
+                {
+                    PopupAutoYes.Locate3dAfterPrompt = null;   // 拒绝模式下绝不给打开期修链任何机会
+                    log("chain: 拒绝模式（V1.1）＝不对「请更新3D文件位置」做打开期修链，交给「改变链接文件」对话框。");
+                }
                 // 打开同名 exb（图纸环境；可能弹「数据源更新」等框，由代点器答 是）
                 bool already = false;
                 try { svc.App.OpenFile2(exb, false, true, out already); }
@@ -193,7 +205,12 @@ namespace caxa3dBatchMaster
                 try
                 {
                     string fn = Path.GetFileName(exb);
+                    // V1.1 收尾加固：改变链接文件「确定」后 CAXA 可能自弹「另存为/保存更改」框，
+                    // 它不收掉，CRX 的 CLOSEDOC（ID_FILE_SAVE 同步保存）会被堵死 ⇒ 30s 超时 ⇒ exb 卡死。
+                    // 关前先把这张框点掉（存到 CAXA 已预填路径），让图纸回到空闲再关。
+                    DismissPendingSavePrompt(exb, log);
                     BridgeReply close = ViewBridge.Request("CLOSEDOC", fn, true, 30000, log);
+                    ResolveSavePrompt(exb, log);   // CLOSEDOC 的 ID_FILE_SAVE 可能再弹一次，兜底收
                     log("chain: 关闭图纸 " + fn + " ⇒ " + close.Describe());
                 }
                 catch (Exception ex) { log("chain: 关闭图纸异常：" + ex.Message); }
@@ -264,10 +281,69 @@ namespace caxa3dBatchMaster
             try
             {
                 string fn = Path.GetFileName(exb);
+                DismissPendingSavePrompt(exb, log);
                 BridgeReply close = ViewBridge.Request("CLOSEDOC", fn, true, 30000, log);
+                ResolveSavePrompt(exb, log);
                 log("chain: 关闭图纸 " + fn + " ⇒ " + close.Describe());
             }
             catch (Exception ex) { log("chain: 关闭图纸异常：" + ex.Message); }
+        }
+
+        /// <summary>
+        /// 关图纸时被「保存更改?」或「另存为」框堵着（exb 改名/链接变动后 CAXA 自己弹，或 CLOSEDOC 的
+        /// ID_FILE_SAVE 触发的另存为）。这张框让文档回不到空闲，CRX 的 CLOSEDOC（同步保存）会被它堵死
+        /// ⇒ 30s 超时 ⇒ exb 一直开着。识别**目标 exb** 的保存框并收掉它：
+        ///   - 另存为类：文件名命中本 exb 后点「保存」（不改动文件名，存到 CAXA 已预填的当前路径）；
+        ///   - 保存更改类（是/否/取消）：点「是」。
+        /// 只动文件名命中本 exb 的框，避免误存别的文档。返回是否处理过至少一张。
+        /// </summary>
+        private static bool ResolveSavePrompt(string exbFullPath, Action<string> log)
+        {
+            if (string.IsNullOrEmpty(exbFullPath)) return false;
+            string baseName = Path.GetFileName(exbFullPath);
+            IntPtr dlg = UiWin.FindTopByTitle("另存为");
+            if (dlg == IntPtr.Zero) dlg = UiWin.FindTopByTitle("保存");
+            if (dlg == IntPtr.Zero) return false;
+            IntPtr edit = UiWin.FirstEdit(dlg);
+            string fname = edit != IntPtr.Zero ? UiWin.TextOf(edit) : "";
+            bool nameOk = string.IsNullOrEmpty(fname) ||
+                          fname.IndexOf(baseName, StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!nameOk)
+            {
+                Diagnostics.Log("cl: 保存框文件名[" + fname + "] 不命中本 exb[" + baseName +
+                                "]，不代点，留人工处理");
+                return false;
+            }
+            UiCtrl saveBtn = UiWin.FindInSubtree(dlg, "保存");
+            UiCtrl yesBtn = UiWin.FindInSubtree(dlg, "是");
+            if (saveBtn != null)
+            {
+                UiWin.Click(saveBtn, "收掉「另存为」框（存到 CAXA 已预填路径）");
+                log("chain: 收掉「另存为」框（存到 CAXA 已预填路径）");
+                return true;
+            }
+            if (yesBtn != null)
+            {
+                UiWin.Click(yesBtn, "收掉「保存更改」框（点 是 存盘）");
+                log("chain: 收掉「保存更改」框（点 是 存盘）");
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>关图纸前轮询收掉「另存为/保存更改」框：最多约 12s，直到没有保存框。</summary>
+        private static void DismissPendingSavePrompt(string exbFullPath, Action<string> log)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < 12000)
+            {
+                bool acted = ResolveSavePrompt(exbFullPath, log);
+                IntPtr dlg = UiWin.FindTopByTitle("另存为");
+                if (dlg == IntPtr.Zero) dlg = UiWin.FindTopByTitle("保存");
+                if (!acted && dlg == IntPtr.Zero) break;
+                System.Threading.Thread.Sleep(400);
+            }
+            log("chain: 保存框收尾轮询结束（" + (int)sw.ElapsedMilliseconds + "ms）");
         }
 
         /// <summary>「钣金件设默认」真实现（参考 SheetMetalDefaultCore）。权威判据＝r.NameChanged

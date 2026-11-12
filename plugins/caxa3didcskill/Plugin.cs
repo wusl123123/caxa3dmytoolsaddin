@@ -8,7 +8,7 @@ using Caxa3dMyTools.Contracts;
 namespace caxa3didcskill
 {
     /// <summary>
-    /// 「2. 独立插件」列的唯一入口：外部工具启动器。
+    /// 「2. 系统工具」列：外部工具启动器（2026-11-09 由「独立插件」列并入系统工具列）。
     ///
     /// 定位说明（规则 16.6 / 第 17 节）：
     ///   进程清理只允许在**进程外**做——工具本体是 caxa3didcskill.exe（独立 WinForms 进程），
@@ -29,8 +29,8 @@ namespace caxa3didcskill
 
         public string DisplayName { get { return "后台进程清理"; } }
 
-        /// <summary>独立 EXE/外部进程方式运行，归入「2. 独立插件」列。</summary>
-        public PluginCategory Category { get { return PluginCategory.Independent; } }
+        /// <summary>独立 EXE/外部进程方式运行，归入「2. 系统工具」列（两列化后 Independent 不再单独设列）。</summary>
+        public PluginCategory Category { get { return PluginCategory.SystemTool; } }
 
         /// <summary>Host 加载时只做准备：解析 EXE 路径并写日志，绝不启动进程。</summary>
         public void Initialize(IPluginHost host)

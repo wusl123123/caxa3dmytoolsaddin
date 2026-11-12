@@ -136,11 +136,26 @@ namespace caxa3dBatchMaster
             return sb.ToString();
         }
 
-        private static string TextOf(IntPtr h)
+        public static string TextOf(IntPtr h)
         {
             var sb = new StringBuilder(256);
             GetWindowTextW(h, sb, sb.Capacity);
             return sb.ToString();
+        }
+
+        /// <summary>子树里第一个可见 Edit（用于「另存为」框读/填文件名）。</summary>
+        public static IntPtr FirstEdit(IntPtr root)
+        {
+            if (root == IntPtr.Zero) return IntPtr.Zero;
+            IntPtr found = IntPtr.Zero;
+            EnumChildWindows(root, (h, l) =>
+            {
+                if (found != IntPtr.Zero) return false;
+                if (ClassOf(h) != "Edit" || !IsWindowVisible(h)) return true;
+                found = h;
+                return false;
+            }, IntPtr.Zero);
+            return found;
         }
 
         /// <summary>
@@ -273,6 +288,40 @@ namespace caxa3dBatchMaster
                 return false;
             }, IntPtr.Zero);
             return found;
+        }
+
+        /// <summary>
+        /// 枚举白名单进程（本进程 + CAXADraft）当前所有可见模态 #32770 顶层窗口。
+        /// 标题 Normalize 后含 exclude 中任一子串的跳过；含「 - [」的文档主窗口类框一律跳过。
+        /// 用途：另存框打不开时找"堵路模态框"（2026-11-11 参考工程批量转换实机：模态框堵死主框架，
+        /// ID_FILE_SAVE_AS 两路全打不开）。（移植自 caxa3dexbtracker UiWin）
+        /// </summary>
+        public static List<IntPtr> FindModalDialogs(params string[] excludeTitleParts)
+        {
+            var list = new List<IntPtr>();
+            EnumWindows((h, l) =>
+            {
+                uint pid;
+                GetWindowThreadProcessId(h, out pid);
+                if (!IsWatchedPid(pid)) return true;
+                if (!IsWindowVisible(h)) return true;
+                string cls = ClassOf(h);
+                if (cls != "#32770") return true;
+                string raw = TextOf(h);
+                if (raw.IndexOf(" - [", StringComparison.Ordinal) >= 0) return true;   // 文档主窗口
+                string t = Normalize(raw);
+                if (excludeTitleParts != null)
+                {
+                    foreach (string ex in excludeTitleParts)
+                    {
+                        string nx = Normalize(ex ?? "");
+                        if (nx.Length > 0 && t.Contains(nx)) return true;
+                    }
+                }
+                list.Add(h);
+                return true;
+            }, IntPtr.Zero);
+            return list;
         }
 
         private static readonly Dictionary<uint, string> _pidNames = new Dictionary<uint, string>();

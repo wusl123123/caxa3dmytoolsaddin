@@ -56,9 +56,9 @@ namespace caxa3dcodenameextraction
         /// <param name="log">日志回调</param>
         /// <param name="pickExb">找不到同名 exb 时由用户指定：入参是建议路径，返回 null 表示取消</param>
         /// <param name="openExb">
-        /// true（默认，走 CRX 推命令那条路）= 需要把 exb 真的打开，CRX 才认得到它；
-        /// false（走 API 那条路）= **只解析路径、不打开**，因为 `UpdateDraftViews(exbPath, …)`
-        /// 自己按路径干活，多开一张图纸只会污染前台环境。
+        /// false（本工程固定传 false）= **只解析路径、不打开**：打开动作一律交给调用方的
+        /// <c>EnsureDrawingOpened</c> 焐热纪律 —— 直接 OpenFile2 冷启动会崩在 dataexchange.dll
+        /// （坑 148），这条不许绕；Prepare 自己不开图。
         /// </param>
         /// <param name="waitCrx">是否需要等 CRX 就绪（纯 API 路径完全用不上 CRX，别白等 25 秒）</param>
         public static Update3DBomPlan Prepare(IZBaseApp app, Action<string> log, Func<string, string> pickExb,
@@ -242,7 +242,7 @@ namespace caxa3dcodenameextraction
             if (openExb)
                 OpenExbAndWaitReady(app, exbPath, log, waitCrx);
             else
-                log("更新3dbom：纯 API 模式 —— 不打开 exb、不等 CRX，直接把路径交给 UpdateDraftViews");
+                log("更新3dbom：Prepare 只解析路径不打开 —— 打开动作交给调用方的 EnsureDrawingOpened 焐热纪律（坑 148）");
 
             return new Update3DBomPlan
             {

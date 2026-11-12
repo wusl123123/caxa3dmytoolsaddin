@@ -11,7 +11,8 @@ namespace caxa3dmytoolsaddin
     /// <summary>
     /// 我的工具箱主窗口：
     ///   - 顶部只有「窗口前置」开关（默认开启，点击可切换）；
-    ///   - 主体为四列表格：1.常用插件 / 2.独立插件 / 3.系统工具 / 4.测试插件；
+    ///   - 主体为两列表格：1.常用插件 / 2.系统工具（2026-11-09 由四列收敛为两列，
+    ///     独立插件列并入系统工具、测试插件列随插件移除而取消）；
     ///   - 每个插件占一个单元格，单击单元格打开；单元格不折行、不缩小字体，
     ///     列最小宽度按最长文字实测，窗口最小尺寸随之放大，避免文字被遮挡。
     /// </summary>
@@ -53,17 +54,13 @@ namespace caxa3dmytoolsaddin
         private static readonly PluginCategory[] Columns =
         {
             PluginCategory.BuiltIn,
-            PluginCategory.Independent,
-            PluginCategory.SystemTool,
-            PluginCategory.Test
+            PluginCategory.SystemTool
         };
 
         private static readonly string[] ColumnTitles =
         {
             "1. 常用插件",
-            "2. 独立插件",
-            "3. 系统工具",
-            "4. 测试插件"
+            "2. 系统工具"
         };
 
         /// <summary>主窗口标题严格为「中文名称-yyyyMMddHHmm」，版本 = 主程序 DLL 写入时间，编译即自动更新。</summary>
@@ -216,15 +213,13 @@ namespace caxa3dmytoolsaddin
             return grid;
         }
 
-        /// <summary>把插件按分类填入表格；空分类显示一行占位文字。</summary>
+        /// <summary>把插件按分类填入表格（仅两列）；空分类显示一行占位文字。</summary>
         private void FillTable()
         {
             var groups = new Dictionary<PluginCategory, List<IPlugin>>
             {
                 { PluginCategory.BuiltIn, new List<IPlugin>() },
-                { PluginCategory.Independent, new List<IPlugin>() },
-                { PluginCategory.SystemTool, new List<IPlugin>() },
-                { PluginCategory.Test, new List<IPlugin>() }
+                { PluginCategory.SystemTool, new List<IPlugin>() }
             };
 
             foreach (IPlugin plugin in _manager.Plugins)
@@ -293,12 +288,10 @@ namespace caxa3dmytoolsaddin
         {
             switch (plugin.Category)
             {
-                case PluginCategory.Independent:
                 case PluginCategory.SystemTool:
-                case PluginCategory.Test:
-                    return plugin.Category;
+                    return PluginCategory.SystemTool;
                 default:
-                    // 未知分类归入常用列，避免插件从界面上消失
+                    // 独立/测试/未知分类一律归入常用列：两列化后界面只认常用与系统工具
                     return PluginCategory.BuiltIn;
             }
         }

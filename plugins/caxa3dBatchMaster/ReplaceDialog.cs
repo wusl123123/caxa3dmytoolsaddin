@@ -106,6 +106,7 @@ namespace caxa3dBatchMaster
             for (int r = from; r < max; r++)
             {
                 if (_grid.Rows[r].IsNewRow) continue;
+                if (_grid.Rows[r].Cells[_col].ReadOnly) continue;   // 冻结格（F2＝装配体自身）对查找/替换完全透明
                 if (Match(_grid.Rows[r].Cells[_col].Value?.ToString(), find)) return r;
             }
             return -1;
@@ -141,9 +142,16 @@ namespace caxa3dBatchMaster
             int r = _lastFoundRow;
             var cell = _grid.Rows[r].Cells[_col];
             string cur = cell.Value?.ToString() ?? "";
-            cell.Value = ReplaceText(cur, find, _txtReplace.Text);
-            _onChanged?.Invoke();
-            _log?.Invoke($"已在列 {TableService.ColumnLetter(_col)} 第 {r + 1} 行替换。");
+            string after = ReplaceText(cur, find, _txtReplace.Text);
+            if (!string.Equals(cur, after, StringComparison.Ordinal))
+            {
+                cell.Value = after;
+                // 程序化赋值不走 CellBeginEdit/CellEndEdit ⇒ 三色状态必须在这里手工打：
+                // 替换成功＝用户主动改动 ⇒ 黄（与三色模型口径一致：改动尚未被返填确认）
+                CellStates.Set(_grid, r, _col, CellState.Edited);
+                _onChanged?.Invoke();
+                _log?.Invoke($"已在列 {TableService.ColumnLetter(_col)} 第 {r + 1} 行替换。");
+            }
             BtnFind_Click(sender, e);   // 继续查找下一个
         }
 
@@ -157,12 +165,14 @@ namespace caxa3dBatchMaster
             {
                 if (_grid.Rows[r].IsNewRow) continue;
                 var cell = _grid.Rows[r].Cells[_col];
+                if (cell.ReadOnly) continue;                       // 冻结格（F2＝装配体自身）不允许被替换
                 string cur = cell.Value?.ToString() ?? "";
-                if (Match(cur, find))
-                {
-                    cell.Value = ReplaceText(cur, find, rep);
-                    cnt++;
-                }
+                string after = ReplaceText(cur, find, rep);
+                if (string.Equals(cur, after, StringComparison.Ordinal)) continue;
+                cell.Value = after;
+                // 程序化赋值不走 CellEndEdit ⇒ 与单个替换同口径：替换成功＝黄（用户改过）
+                CellStates.Set(_grid, r, _col, CellState.Edited);
+                cnt++;
             }
             _onChanged?.Invoke();
             _log?.Invoke($"列 {TableService.ColumnLetter(_col)} 全部替换完成，共 {cnt} 个单元格。");

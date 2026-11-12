@@ -239,6 +239,8 @@ public interface IPluginHost
 | 12 | 接手外部 `.icc` 先解析 `MemberData`，确认程序集与类型可加载 |
 | 13 | CAXA COM 对象只能在 UI 主线程访问，严禁 `Task.Run` / `BackgroundWorker`；长任务用限流 `Application.DoEvents()` + `CancellationTokenSource` |
 | 14 | 迁入后禁止「顺手优化」原独立 Add-in 的线程模型 |
+| 15 | 编译 ≠ 安装：`build.ps1` / `打包.bat` 只做编译、暂存、打包，一律不得自动触发安装（不调 deploy、不写注册表、不动 Addin 配置）；安装只由用户显式运行根目录 `安装.bat`（2026-11-12 用户指令铁律化） |
+| 16 | 带图纸环境预热能力的子插件（随包带预热 `.exb`），其工具窗打开后 1 秒自动预热图纸环境（热态自动跳过、流程期让位；2026-11-12 用户指令） |
 
 跨插件约定：自定义属性统一写入共享属性表；CAXA COM 调用一律 STA UI 线程。
 

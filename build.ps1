@@ -40,10 +40,6 @@ $idcToolExe  = Join-Path $root 'tools\caxa3didcskill\bin\x64\Release\net48\caxa3
 # 子插件：项目文件 + 暂存目录名（与插件 Id 一致）
 $plugins = @(
     @{ Name = 'caxa3dAttributeManageraddin'; Project = (Join-Path $root 'plugins\caxa3dAttributeManageraddin\caxa3dAttributeManageraddin.csproj') },
-    @{ Name = 'Caxa3dcudeaddin';             Project = (Join-Path $root 'plugins\Caxa3dcudeaddin\Caxa3dcudeaddin.csproj') },
-    # 操作 API 抓取器：除 DLL 外还要带图纸环境 CRX 桥接模块
-    @{ Name = 'caxa3dapigetaddin';           Project = (Join-Path $root 'plugins\caxa3dapigetaddin\caxa3dapigetaddin.csproj');
-       Extra = @('.crx') },
     # 带图改名及图号分离：除 DLL 外还要带规则/说明/控件基线/CRX 注册脚本/CRX 桥本体，
     # 以及图纸环境预热用的载体图纸 .exb（缺它冷启动预热直接失效，见插件总结「图纸环境预热」）
     @{ Name = 'caxa3dcodenameextraction';    Project = (Join-Path $root 'plugins\caxa3dcodenameextraction\caxa3dcodenameextraction.csproj');
@@ -58,9 +54,11 @@ $plugins = @(
     # 树形BOM：需带默认表头模板 .xlsx 与合并规则种子 .txt
     @{ Name = 'caxa3dTreeBom';               Project = (Join-Path $root 'plugins\caxa3dTreeBom\caxa3dTreeBom.csproj');
        Extra = @('.txt') },
-    # 小工具合集：需带坐标数据示例 .txt，以及「删除所有布局(除模型)」用的图纸环境 CRX 桥 .crx
-    @{ Name = 'caxa3dminitool';              Project = (Join-Path $root 'plugins\caxa3dminitool\caxa3dminitool.csproj');
-       Extra = @('.txt', '.crx') },
+    # 按钮工具（常用列）：由独立 Add-in caxa3dButton 移植为子插件（2026-11-09）。
+    # 预热载体图纸 caxa3d图纸环境预热.exb 必须随 DLL 走（MainForm.FindWarmupExb 从程序集目录逐级向上找）；
+    # 图号分离规则 caxa3dButton图号分离规则.txt 放在插件目录时生效（缺席时界面上给出原因，不报错）
+    @{ Name = 'caxa3dButton';                Project = (Join-Path $root 'plugins\caxa3dButton\caxa3dButton.csproj');
+       Extra = @('.exb', '.txt') },
     # 折弯管理大师：需带使用说明 .txt
     @{ Name = 'caxa3dsheetmaster';           Project = (Join-Path $root 'plugins\caxa3dsheetmaster\caxa3dsheetmaster.csproj');
        Extra = @('.txt') },

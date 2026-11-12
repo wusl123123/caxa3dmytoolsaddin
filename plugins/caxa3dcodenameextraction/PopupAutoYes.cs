@@ -69,6 +69,12 @@ namespace caxa3dcodenameextraction
             "取消(&c)", "取消(c)", "取消", "cancel", "&cancel", "关闭(&c)", "关闭(c)", "关闭", "close"
         };
 
+        /// <summary>「否」类按钮文字（用于「请更新3D文件位置」的拒绝分支，见 <see cref="DeclineUpdate3dLocation"/>）。</summary>
+        private static readonly string[] NoTexts =
+        {
+            "否(&n)", "否(n)", "否", "no", "&no", "否(&N)", "否(N)"
+        };
+
         /// <summary>
         /// 「全部取消」类按钮：字体缺失框「指定形文件」用它一次性回落到全局缺省字体。
         /// 助记键位置没取证过，所以按前缀认，不列死形式。
@@ -103,6 +109,14 @@ namespace caxa3dcodenameextraction
         /// 里元素名还是旧名）。点「确定」等于让 CAXA 做一件它做不成、还会把改名带倒的事。
         /// </summary>
         public static volatile bool DeclineLinkFileRename;
+
+        /// <summary>
+        /// 「更新工程图链接文件-V1.1」的拒绝模式标志：置了本标志，打开 exb 弹出的「请更新3D文件位置」
+        /// 就改点「否」（链接保持陈旧），改由后续的「改变链接文件」对话框(代点法)单独修链 —— 即 V1.1 默认修复路径。
+        /// 不置（保底）：本引擎点「是」+文件框布防，链接在打开期就被修好。
+        /// ★ 只在 V1.1 流程借用窗口内置位、finally 里清零，不污染其它流程。
+        /// </summary>
+        public static volatile bool DeclineUpdate3dLocation;
 
         /// <summary>CAXA 自己弹过「保存文档失败」的正文；hr=0 不代表存上了，以这条为准。
         /// 每次保存前由 <see cref="ResetSaveFailure"/> 清空。</summary>
@@ -283,7 +297,7 @@ namespace caxa3dcodenameextraction
         /// 绝不误点用户此刻自己打开的对话框（包括本插件自己的 MessageBox）。</summary>
         private static readonly string[] TailTitles =
         {
-            "选择用于外部链接的零件或装配", "链接的配置", "重新附加约束", "约束元素"
+            "选择用于外部链接的零件或装配", "链接的配置", "重新附加约束", "约束元素", "尺寸检查"
         };
 
         private static bool IsTailTitle(string title)
@@ -550,6 +564,7 @@ namespace caxa3dcodenameextraction
                 IntPtr yesBtn = IntPtr.Zero;
                 IntPtr openBtn = IntPtr.Zero;
                 IntPtr cancelBtn = IntPtr.Zero;
+                IntPtr noBtn = IntPtr.Zero;
                 IntPtr cancelAllBtn = IntPtr.Zero;
                 IntPtr editCtl = IntPtr.Zero;
                 var comboTexts = new List<string>();
@@ -591,6 +606,13 @@ namespace caxa3dcodenameextraction
                             foreach (string c in CancelTexts)
                             {
                                 if (norm == c) { cancelBtn = h; break; }
+                            }
+                        }
+                        if (noBtn == IntPtr.Zero)
+                        {
+                            foreach (string nn in NoTexts)
+                            {
+                                if (norm == nn) { noBtn = h; break; }
                             }
                         }
                         if (cancelAllBtn == IntPtr.Zero && IsCancelAll(norm)) cancelAllBtn = h;
@@ -661,6 +683,28 @@ namespace caxa3dcodenameextraction
                     // 会让下一张同名的框也被填上）。
                     if (BodyHas(staticTexts, "请更新3D文件位置"))
                     {
+                        // 拒绝模式（V1.1）：点「否/取消」让链接保持陈旧，改由「改变链接文件」对话框(代点法)单独修链。
+                        // 优先「否」，没有「否」再退「取消」。两种都点不到就放任（不布防、不点「是」），
+                        // 让 CAXA 自己处理（通常＝打开但链接断，正好留给代点法修链）。
+                        if (DeclineUpdate3dLocation)
+                        {
+                            IntPtr declineBtn = noBtn != IntPtr.Zero ? noBtn
+                                                : (cancelBtn != IntPtr.Zero ? cancelBtn : IntPtr.Zero);
+                            if (declineBtn != IntPtr.Zero)
+                            {
+                                Diagnostics.Log("PopupAutoYes: 拒绝「请更新3D文件位置」（V1.1 拒绝模式：" +
+                                                "链接保持陈旧，改由「改变链接文件」对话框代点法修链）" +
+                                                BodySuffix(staticTexts));
+                                PostMessage(declineBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                                Interlocked.Increment(ref _clickCount);
+                                _clickedOnce.Add(dlgKey);
+                                continue;   // 跳过下面的通用「是」点击，也不布防文件框
+                            }
+                            Diagnostics.Log("PopupAutoYes: 拒绝模式但找不到「否/取消」按钮，" +
+                                            "未点「请更新3D文件位置」（链接保持陈旧，留给代点法修链）" +
+                                            BodySuffix(staticTexts));
+                            continue;
+                        }
                         string loc = Locate3dAfterPrompt;
                         if (!string.IsNullOrEmpty(loc))
                         {
@@ -669,6 +713,21 @@ namespace caxa3dcodenameextraction
                             Diagnostics.Log("PopupAutoYes: 「请更新3D文件位置」已布防，" +
                                             "随后的「打开」将指向「" + loc + "」");
                         }
+                    }
+
+                    // 「尺寸检查」：V1.1 改链后重新链接 3D 模型，CAXA 对装配/图纸的尺寸关联做检查，
+                    // 弹出"找到失效尺寸 N 个"。它不在通用代点清单里（通用分支只会点「确定」去重建），
+                    // 也不在原来的收尾巡检白名单，于是会卡死 CAXA 主框架。
+                    // ★ 按用户决定：点「取消」关闭，**不重建/不删失效尺寸**（零意外改动，尺寸要不要修全交人工）。
+                    // 已顺带加进 TailTitles，收尾巡检期也能认到它。
+                    if (title.IndexOf("尺寸检查", StringComparison.Ordinal) >= 0 && cancelBtn != IntPtr.Zero)
+                    {
+                        Diagnostics.Log("PopupAutoYes: 尺寸检查 → 点「取消」关闭（不重建失效尺寸）@「" + title +
+                                        "」[" + proc + "]" + BodySuffix(staticTexts));
+                        PostMessage(cancelBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+                        Interlocked.Increment(ref _clickCount);
+                        _clickedOnce.Add(dlgKey);
+                        continue;
                     }
 
                     Diagnostics.Log("PopupAutoYes: 点击「" + hitText + "」@「" + title + "」[" + proc + "]" + BodySuffix(staticTexts));

@@ -582,6 +582,24 @@ namespace caxa3dBatchMaster
             else map[key] = new ComponentInfo { Path = path ?? "", Name = name, Ext = ext ?? "" };
         }
 
+        /// <summary>当前打开文档的文件路径（分类打包取「设计环境零件名」用；IZDoc.get_Name，槽 11）。</summary>
+        public string ActiveDocFilePath => GetActiveDocFilePath();
+
+        /// <summary>当前打开的设计环境零件名（文件名去扩展名；Name 可能返回标题而非全路径，故只取最后一段）。</summary>
+        public string ActiveDocPartName
+        {
+            get
+            {
+                string p = ActiveDocFilePath;
+                if (string.IsNullOrWhiteSpace(p)) return "";
+                string leaf = p.Replace('/', '\\').Trim();
+                int k = leaf.LastIndexOf('\\');
+                if (k >= 0) leaf = leaf.Substring(k + 1);
+                try { return Path.GetFileNameWithoutExtension(leaf).Trim(); }
+                catch { return leaf; }
+            }
+        }
+
         /// <summary>当前打开文档的文件路径（IZDoc.get_Name，槽 11）。【待验：部分版本可能返回标题而非全路径】</summary>
         private string GetActiveDocFilePath()
         {
@@ -670,8 +688,8 @@ namespace caxa3dBatchMaster
             }
         }
 
-        // 共享表铁律（规则 14.7/14.9）：本工程原有的「零件级/非共享表」获取函数已删除，
-        // 读与写都只允许走 GetSharedPropMgr；确认不到共享表＝失败/第三态，绝不兜底换表。
+        // 共享表铁律（规则 14.7/14.9）：本工程原有的 GetPartPropMgr（零件级/非共享表）已删除，
+        // 读与写都只允许走 GetSharedPropMgr；确认不到共享表＝失败/第三态，不换表。
 
         /// <summary>按表头名读取一行所需属性（H 列起的自定义属性名）。</summary>
         public Dictionary<string, string> ReadRowProperties(IZElement elem, IList<string> headers)

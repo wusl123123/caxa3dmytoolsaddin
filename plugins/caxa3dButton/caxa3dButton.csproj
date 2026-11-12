@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 按钮工具（子插件）：由独立 Add-in caxa3dButton 移植而来。
+       与原独立 Add-in 工程的差异（改哪一处都要先看这段）：
+         * 不生成 / 不嵌入 SxS 清单，也不做 mt.exe + sn.exe -R 后处理 —— 集合体里只有 Host 带清单。
+         * 不引用 stdole，不带 Addin.cs / deploy.ps1 / 安装.bat（COM 入口整条删除）。
+         * 预热载体图纸 caxa3d图纸环境预热.exb 用 Link 指向仓库根那份，随编译拷进输出目录，
+           build.ps1 需为它登记 Extra '.exb'（MainForm.FindWarmupExb 从程序集目录逐级向上找）。 -->
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>caxa3dButton</RootNamespace>
+    <AssemblyName>caxa3dButton</AssemblyName>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <!-- CAXA 3D 2024/2027 均为 64 位进程，子插件 DLL 必须 x64 -->
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <AssemblyOriginatorKeyFile>Lib\ICApiAddin.snk</AssemblyOriginatorKeyFile>
+    <SignAssembly>true</SignAssembly>
+    <DelaySign>false</DelaySign>
+    <Version>1.0.0.0</Version>
+    <Product>caxa3dButton</Product>
+    <AssemblyTitle>CAXA 3D 按钮工具（子插件）</AssemblyTitle>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+  </PropertyGroup>
+
+  <!-- 无 Visual Studio 的机器上也能用 dotnet build 编译 net48 -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
+      <PrivateAssets>All</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- 插件契约：Host 反射加载的唯一耦合点（运行期只用 Host 那一份，禁止把契约 DLL 拷进插件目录） -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Contracts\Contracts.csproj" />
+    <Reference Include="Microsoft.CSharp" />
+    <!-- CAXA 3D 类型库（类型嵌入本 DLL，运行期无外部依赖）：MainForm 只需要 IZBaseApp / ZAddinSite 类型 -->
+    <Reference Include="interop.ICApiIronCAD">
+      <HintPath>Lib\interop.ICApiIronCAD.dll</HintPath>
+      <EmbedInteropTypes>True</EmbedInteropTypes>
+    </Reference>
+  </ItemGroup>
+
+  <!-- 运行期真实读取的资源随编译拷到输出目录 -->
+  <ItemGroup>
+    <None Include="C:\code\ICAPI\caxa3dmytoolsaddin\caxa3d图纸环境预热.exb" Link="caxa3d图纸环境预热.exb" CopyToOutputDirectory="PreserveNewest" Condition="Exists('C:\code\ICAPI\caxa3dmytoolsaddin\caxa3d图纸环境预热.exb')" />
+  </ItemGroup>
+
+</Project>

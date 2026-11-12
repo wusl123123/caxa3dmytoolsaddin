@@ -47,6 +47,11 @@
 //                本 verb 立即回 OK(tb-queued)；判定结果异步落日志 REQ.tb-result / REQ.tb-giveup
 //                / REQ.tb-done（C# 侧 CrxBridge.LogCount 按子串匹配，与参考工程口径一致）。
 //   TB_ABORT     confirm=否 token=是   —— 终止标题栏派发与判定，回 OK(tb-aborted)。
+//   CONVERT_DXF  confirm=是 token=是   —— TDExportControl.Export 转 dxf/dwg/pdf
+//                （★ 2027 实机 GetIDispatch(true) 恒 NULL 已判死=规则总纲 29②，仅留作拍板候选）。
+//   OPEN_EXB     confirm=是 token=是   —— 图纸环境侧打开/激活 exb（A 文档管理器 /
+//                B 键入 CX_open_Impl / C 原生命令三通道，判成功只认文档在册）；
+//                业务 exb 打开的唯一入口，替代 Scene 侧 OpenFile2 退役路线。
 //   · 三道拒绝闸（未知 action / 令牌不符 / 缺 confirm）各自 ERR 回包 + 一行 bridge: 日志。
 //
 // ── 会话令牌 ────────────────────────────────────────────────────────
@@ -395,23 +400,41 @@ static std::wstring WndTitle(HWND h)
     return std::wstring(txt);
 }
 
+// ★ 文件名去扩展名（取 stem）：窗口标题在存盘后常去掉 .exb，只靠全名匹配会失配 → CLOSEDOC 找不到窗口、exb 关不掉。
+//   stem 始终稳定出现在标题里。
+static std::wstring DocStemOf(const std::wstring& f)
+{
+    size_t dot = f.find_last_of(L'.');
+    if (dot == std::wstring::npos || dot == 0) return f;
+    return f.substr(0, dot);
+}
+// 标题是否命中目标文档：全名（含 .exb）或 stem 任一命中即可（不区分大小写，与 ContainsNoCase 一致）。
+static bool TitleMatchesDoc(const std::wstring& title, const std::wstring& baseName)
+{
+    if (baseName.empty()) return true;
+    if (ContainsNoCase(title, baseName)) return true;
+    std::wstring stem = DocStemOf(baseName);
+    return !stem.empty() && ContainsNoCase(title, stem);
+}
+
 /// <summary>按文件名（只比文件名）找那张图纸的 MDI 子窗口；找不到绝不退化。</summary>
 static HWND FindDrawingWindowByFile(const std::wstring& baseName, std::wstring& why)
 {
+    // ★ 绝不按进程(pid)过滤：exb 图纸窗口属于 Draft 进程(CDRAFT_M_IC.exe)，与加载本 CRX 的
+    // IronCAD.exe 不是同一 pid。按 pid 过滤会跳过目标 exb ⇒ 找不到、关不掉（2026-11-08 实证）。
     for (HWND h = GetTopWindow(NULL); h; h = GetWindow(h, GW_HWNDNEXT))
     {
-        DWORD pid = 0;
-        GetWindowThreadProcessId(h, &pid);
-        if (pid != GetCurrentProcessId() || !IsWindowVisible(h)) continue;
+        if (!IsWindowVisible(h)) continue;
         HWND mdi = LocateMdiClient(h);
         if (!mdi) continue;
         for (HWND c = GetWindow(mdi, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT))
         {
-            if (!IsDraftChild(c)) continue;
-            if (ContainsNoCase(WndTitle(c), baseName)) return c;
+            // 精确按标题命中 exb 文件名/stem；不再强求窗口类含 AfxFrameOrView
+            // （Draft 进程视图类可能与 IronCAD 侧不同，按类卡死会漏关 exb）。
+            if (TitleMatchesDoc(WndTitle(c), baseName)) return c;
         }
     }
-    why = L"没有类名含 AfxFrameOrView 且标题含该文件名的 MDI 子窗口";
+    why = L"没有标题含该文件名的 MDI 子窗口";
     return NULL;
 }
 
@@ -420,9 +443,9 @@ static HWND FindActiveDrawingWindow(std::wstring& why)
 {
     for (HWND h = GetTopWindow(NULL); h; h = GetWindow(h, GW_HWNDNEXT))
     {
-        DWORD pid = 0;
-        GetWindowThreadProcessId(h, &pid);
-        if (pid != GetCurrentProcessId() || !IsWindowVisible(h)) continue;
+        // ★ 绝不按进程(pid)过滤：见 FindDrawingWindowByFile 注释。exb 在 Draft 进程，本 CRX 在
+        // IronCAD 进程，按 pid 过滤会漏掉目标 exb（2026-11-08 实证）。
+        if (!IsWindowVisible(h)) continue;
         HWND mdi = LocateMdiClient(h);
         if (!mdi) continue;
         BOOL bMax = FALSE;
@@ -613,7 +636,7 @@ static void JobTick()
 static void DoPing(int seq, const std::wstring& /*arg*/)
 {
     std::wstring msg = L"bridge alive; token=" + g_token +
-                       L"; verbs=PING,CLOSEDOC,CLOSERAW,SAVE,EXEC_NATIVE,TITLEBLOCK_3DSET,TB_ABORT";
+                       L"; verbs=PING,CLOSEDOC,CLOSERAW,SAVE,EXEC_NATIVE,TITLEBLOCK_3DSET,TB_ABORT,CONVERT_DXF,OPEN_EXB";
     WriteResp(seq, L"PING", L"OK", msg);
     Log("ping: token=%hs", W2U8(g_token).c_str());
 }
@@ -775,6 +798,381 @@ static void DoExecNative(int seq, const std::wstring& arg)
 //---------------------------------------------------------------------
 typedef void (*CmdHandler)(int seq, const std::wstring& arg);
 
+//---------------------------------------------------------------------
+// 「转换成 dxf/dwg/pdf」：CONVERT_DXF —— arg = <exb 全路径>|<输出全路径>|<eZExportDrawingType 整型>
+//   走图纸环境自己的导出 API（IZDrawingDoc::TDExportControl → IZTDExportControl::Export），
+//   把图纸转成 dxf/dwg/pdf（CAXA 图纸模块原生"输出/转换"通道）。
+//   ★ PDF（type=19）先走专用管理器 IZDrawingDoc::TDPDFExportManager → ExportDrawing，失败再回落 TDExportControl。
+//   ★ 全程 COM 后期绑定（GetIDsOfNames + Invoke），不依赖任何 Draft C++ 头文件/UUID；判成功以输出文件存在为准（C# 侧复核）。
+//   （移植自 caxa3dButtonBridge DoConvertDxf，适配本桥 WriteResp/Log 约定；纯 API、无 UI）
+//---------------------------------------------------------------------
+static const IID kIID_IZDrawingDoc =
+    {0xA7C6ECCB, 0xD616, 0x45F4, {0x8E, 0x79, 0xAF, 0x5D, 0xE6, 0x3D, 0x38, 0x95}};
+static const IID kIID_IZTDExportControl =
+    {0x179B1F88, 0x9FF3, 0x4B40, {0xA4, 0xA7, 0xCA, 0xC4, 0xAD, 0x19, 0x47, 0x7E}};
+
+static std::wstring NormPath(const std::wstring& raw)
+{
+    std::wstring s = raw;
+    size_t b = 0;
+    while (b < s.size() && (s[b] == L' ' || s[b] == L'\t')) ++b;
+    size_t e = s.size();
+    while (e > b && (s[e-1]==L' '||s[e-1]==L'\t'||s[e-1]==L'\r'||s[e-1]==L'\n')) --e;
+    s = s.substr(b, e-b);
+    for (size_t i = 0; i < s.size(); ++i) { if (s[i]==L'/') s[i]=L'\\'; s[i]=(wchar_t)towlower(s[i]); }
+    return s;
+}
+static std::wstring BaseNameOfC(const std::wstring& p)
+{
+    size_t k = p.find_last_of(L"\\/");
+    return (k == std::wstring::npos) ? p : p.substr(k+1);
+}
+static void PumpMessages(int sleepMs)
+{
+    MSG m;
+    while (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessage(&m); }
+    if (sleepMs > 0) Sleep(sleepMs);
+}
+static std::wstring HrText(HRESULT h)
+{
+    wchar_t b[24];
+    swprintf(b, 24, L"0x%08X", (unsigned long)h);
+    return std::wstring(b);
+}
+static IDispatch* DispGetObject(IDispatch* p, const wchar_t* name, std::wstring& err)
+{
+    if (!p) { err = L"文档 IDispatch 为空"; return NULL; }
+    LPOLESTR n[1]; n[0] = const_cast<LPOLESTR>(name);
+    DISPID id = DISPID_UNKNOWN;
+    HRESULT hr = p->GetIDsOfNames(IID_NULL, n, 1, LOCALE_USER_DEFAULT, &id);
+    if (FAILED(hr)) { err = std::wstring(L"GetIDsOfNames(") + name + L") hr=" + HrText(hr); return NULL; }
+    VARIANT v; VariantInit(&v);
+    DISPPARAMS dp; memset(&dp, 0, sizeof(dp));
+    hr = p->Invoke(id, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET, &dp, &v, NULL, NULL);
+    if (FAILED(hr) || v.vt != VT_DISPATCH || v.pdispVal == NULL)
+    {
+        int vt = (int)v.vt;
+        if (v.vt != VT_EMPTY) VariantClear(&v);
+        err = std::wstring(L"取属性 ") + name + L" hr=" + HrText(hr) + L" vt=" + std::to_wstring(vt);
+        return NULL;
+    }
+    IDispatch* r = v.pdispVal; v.vt = VT_EMPTY;
+    return r;
+}
+static bool DispCallBstr(IDispatch* p, const wchar_t* name, const std::wstring& s, std::wstring& err)
+{
+    if (!p) { err = L"接口对象为空"; return false; }
+    LPOLESTR n[1]; n[0] = const_cast<LPOLESTR>(name);
+    DISPID id = DISPID_UNKNOWN;
+    HRESULT hr = p->GetIDsOfNames(IID_NULL, n, 1, LOCALE_USER_DEFAULT, &id);
+    if (FAILED(hr)) { err = std::wstring(L"GetIDsOfNames(") + name + L") hr=" + HrText(hr); return false; }
+    VARIANT a; VariantInit(&a);
+    a.vt = VT_BSTR; a.bstrVal = ::SysAllocString(s.c_str());
+    DISPPARAMS dp; memset(&dp, 0, sizeof(dp));
+    dp.cArgs = 1; dp.rgvarg = &a;
+    hr = p->Invoke(id, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &dp, NULL, NULL, NULL);
+    VariantClear(&a);
+    if (FAILED(hr)) { err = std::wstring(L"调用 ") + name + L" hr=" + HrText(hr); return false; }
+    return true;
+}
+static bool DraftExport(CRxApDocument* pDoc, const std::wstring& outp, int type, std::wstring& err)
+{
+    if (!pDoc) { err = L"目标文档为空"; return false; }
+    IDispatch* pDisp = pDoc->GetIDispatch(true);
+    if (!pDisp) { err = L"GetIDispatch(true) 返回空"; return false; }
+    IDispatch* pTEC = NULL;
+    HRESULT hr = E_FAIL;
+    {
+        std::wstring e1; pTEC = DispGetObject(pDisp, L"TDExportControl", e1);
+        if (pTEC) Log("exportA: got TDExportControl by name");
+        else Log("exportA: name dispatch failed -> try QI + slot 15");
+    }
+    if (!pTEC)
+    {
+        void* pDocI = NULL;
+        hr = pDisp->QueryInterface(kIID_IZDrawingDoc, &pDocI);
+        if (SUCCEEDED(hr) && pDocI)
+        {
+            typedef HRESULT (STDMETHODCALLTYPE *PFN_GetTEC)(void*, IDispatch**);
+            PFN_GetTEC pfn = (PFN_GetTEC)(*(void***)pDocI)[15];
+            IDispatch* pOut = NULL;
+            hr = pfn(pDocI, &pOut);
+            ((IUnknown*)pDocI)->Release();
+            if (SUCCEEDED(hr) && pOut) pTEC = pOut;
+            Log("exportB: QI(IZDrawingDoc)+slot15 hr=%hs", W2U8(HrText(hr)).c_str());
+        }
+        else Log("exportB: QI(IZDrawingDoc) hr=%hs", W2U8(HrText(hr)).c_str());
+    }
+    if (!pTEC) { pDisp->Release(); if (err.empty()) err = L"两条通道都取不到 TDExportControl"; return false; }
+    void* pTecI = NULL;
+    if (SUCCEEDED(pTEC->QueryInterface(kIID_IZTDExportControl, &pTecI)) && pTecI)
+    {
+        typedef HRESULT (STDMETHODCALLTYPE *PFN_Export)(void*, BSTR, long);
+        PFN_Export pexp = (PFN_Export)(*(void***)pTecI)[7];
+        BSTR b = ::SysAllocString(outp.c_str());
+        hr = pexp(pTecI, b, (long)type);
+        ::SysFreeString(b);
+        ((IUnknown*)pTecI)->Release();
+    }
+    else
+    {
+        Log("exportC: QI(IZTDExportControl) failed, fallback to Export by name");
+        DISPID disExp = DISPID_UNKNOWN;
+        LPOLESTR en[1]; en[0] = const_cast<LPOLESTR>(L"Export");
+        hr = pTEC->GetIDsOfNames(IID_NULL, en, 1, LOCALE_USER_DEFAULT, &disExp);
+        if (SUCCEEDED(hr))
+        {
+            VARIANT args[2]; VariantInit(&args[0]); VariantInit(&args[1]);
+            args[0].vt = VT_I4; args[0].lVal = type;
+            args[1].vt = VT_BSTR; args[1].bstrVal = ::SysAllocString(outp.c_str());
+            DISPPARAMS dp; memset(&dp, 0, sizeof(dp));
+            dp.cArgs = 2; dp.rgvarg = args;
+            hr = pTEC->Invoke(disExp, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &dp, NULL, NULL, NULL);
+            VariantClear(&args[0]); VariantClear(&args[1]);
+        }
+        else Log("exportC: GetIDsOfNames(Export) hr=%hs", W2U8(HrText(hr)).c_str());
+    }
+    pTEC->Release(); pDisp->Release();
+    Log("exportD: Export(type=%d) hr=%hs fileExists=%d", type, W2U8(HrText(hr)).c_str(), FileExists(outp.c_str())?1:0);
+    if (FAILED(hr)) { err = L"Export hr=" + HrText(hr); return false; }
+    return true;
+}
+static CRxApDocument* FindDocByPath(const std::wstring& wantNorm)
+{
+    if (!crxDocManager) return NULL;
+    CRxApDocument* found = NULL;
+    CRxApDocumentIterator* it = crxDocManager->newAcApDocumentIterator();
+    if (it)
+    {
+        for (; !it->done(); it->step())
+        {
+            CRxApDocument* d = it->document();
+            if (!d) continue;
+            const CxCHAR* fn = d->fileName();
+            if (!fn || !fn[0]) continue;
+            if (NormPath(std::wstring(fn)) == wantNorm) { found = d; break; }
+        }
+        delete it;
+    }
+    return found;
+}
+static void DoConvertDxf(int seq, const std::wstring& arg)
+{
+    size_t p1 = arg.find(L'|');
+    size_t p2 = (p1 == std::wstring::npos) ? std::wstring::npos : arg.find(L'|', p1 + 1);
+    if (p1 == std::wstring::npos || p2 == std::wstring::npos)
+    {
+        WriteResp(seq, L"CONVERT_DXF", L"ERR", L"参数格式错误（应为 exb路径|输出路径|type）");
+        return;
+    }
+    std::wstring exb  = arg.substr(0, p1);
+    std::wstring outp = arg.substr(p1 + 1, p2 - p1 - 1);
+    std::wstring typS = arg.substr(p2 + 1);
+    if (exb.empty() || outp.empty())
+    {
+        WriteResp(seq, L"CONVERT_DXF", L"ERR", L"exb 路径/输出路径为空，已拒绝");
+        return;
+    }
+    int type = _wtoi(typS.c_str());
+    if (type < 0)
+    {
+        WriteResp(seq, L"CONVERT_DXF", L"ERR", L"type 解析失败：" + typS);
+        return;
+    }
+    if (!crxDocManager)
+    {
+        WriteResp(seq, L"CONVERT_DXF", L"ERR", L"图纸文档管理器不可用（不在图纸环境？）");
+        return;
+    }
+    std::wstring want = NormPath(exb);
+    CRxApDocument* pTarget = FindDocByPath(want);
+    if (!pTarget)
+    {
+        WriteResp(seq, L"CONVERT_DXF", L"ERR",
+                  L"未找到目标图纸（应已由 C# 打开）：" + exb);
+        Log("convert: 目标不在册 want=%hs", W2U8(want).c_str());
+        return;
+    }
+    if (!pTarget->isQuiescent())
+        Log("convert: %hs 不空闲，仍尝试 Export", W2U8(BaseNameOfC(want)).c_str());
+    CRxApDocument* pActive = crxDocManager->mdiActiveDocument();
+    if (pActive != pTarget)
+        crxDocManager->activateDocument(pTarget, false);
+    if (type == 19)
+    {
+        IDispatch* pDoc = pTarget->GetIDispatch(true);
+        if (pDoc)
+        {
+            std::wstring err;
+            IDispatch* pPdf = DispGetObject(pDoc, L"TDPDFExportManager", err);
+            if (pPdf)
+            {
+                bool ok = DispCallBstr(pPdf, L"ExportDrawing", outp, err);
+                pPdf->Release(); pDoc->Release();
+                if (ok)
+                {
+                    WriteResp(seq, L"CONVERT_DXF", L"OK", L"PDF 导出完成（TDPDFExportManager.ExportDrawing）→ " + outp);
+                    Log("convert: %hs -> %hs PDF OK", W2U8(want).c_str(), W2U8(outp).c_str());
+                    return;
+                }
+            }
+            else pDoc->Release();
+            Log("convert: PDF TDPDFExportManager failed -> fallback TDExportControl type=19");
+        }
+    }
+    std::wstring err;
+    if (DraftExport(pTarget, outp, type, err))
+    {
+        WriteResp(seq, L"CONVERT_DXF", L"OK", L"导出完成（TDExportControl.Export type=" + std::to_wstring(type) + L"）→ " + outp);
+        Log("convert: %hs -> %hs type=%d OK", W2U8(want).c_str(), W2U8(outp).c_str(), type);
+    }
+    else
+    {
+        WriteResp(seq, L"CONVERT_DXF", L"ERR", L"导出通道失败：" + err);
+        Log("convert: %hs -> %hs type=%d 失败 %hs", W2U8(want).c_str(), W2U8(outp).c_str(), type, W2U8(err).c_str());
+    }
+}
+
+//---------------------------------------------------------------------
+// 「打开 exb」：arg = <exb 全路径>（移植自 caxa3dexbtracker ExbTrackerBridge DoOpenExb，
+//                适配本桥 WriteResp(seq, action, status, msg) 约定）
+//   ★★ 图纸环境侧打开 exb —— 替代 caxa3d(Scene) 侧 IZBaseApp.OpenFile2：
+//     Scene 侧对业务 exb 是退役路线（Invalid file format 假失败 + 内嵌 CRxView3D 是
+//     AV 触发面；实机 11-12：OpenFile2 每张卡 25~28s、图纸进了 Draft 但 Scene 永远
+//     「未进册」）。已在本项目立项：C# 不得对业务 exb 调任何 caxa3d 侧 COM，
+//     本命令是「打开 exb」的唯一入口。
+//   已在册 → 只激活；不在册 → 三通道直至文档在册：
+//     A crxDocManager->appContextOpenDocument（官方样例写法；★ 绝不包
+//       executeInApplicationContext —— 图纸环境空闲态本身就是一个命令，
+//       「应用上下文永远回不来」，回调 0 次命中 = 旧版 ret=-1 的真正根因）；
+//     B 键入通道 sendStringToExecute CX_open_Impl "<路径>"（兄弟工程实证唯一能把
+//       命令真正跑起来的通道）；
+//     C crxedCommand 原生命令兜底（编辑器忙时被静默丢弃，仅最后一搏）。
+//   判成功只认「文档真的在册」，不认任何返回码。成功后切活动文档 + 1.5s 沉降拍
+//   （isQuiescent 结构性恒 0，8s 每次烧满 → 11-11 参考工程定案收紧为 1.5s；
+//   真正的同步判据是后续 SAVE 的落盘 mtime）。
+//---------------------------------------------------------------------
+static CRxApDocument* WaitDocInRegistry(const std::wstring& wantNorm, int budgetMs)
+{
+    DWORD start = GetTickCount();
+    while (GetTickCount() - start < (DWORD)budgetMs)
+    {
+        PumpMessages(100);
+        CRxApDocument* p = FindDocByPath(wantNorm);
+        if (p) return p;
+    }
+    return NULL;
+}
+
+/// 诊断：把当前在册文档全路径打出来，区分「真没打开」与「打开了但路径匹配不上」。
+static void LogOpenDocs(const wchar_t* tag)
+{
+    if (!crxDocManager) return;
+    CRxApDocumentIterator* it = crxDocManager->newAcApDocumentIterator();
+    if (!it) return;
+    int n = 0;
+    for (; !it->done(); it->step())
+    {
+        CRxApDocument* d = it->document();
+        if (!d) continue;
+        const CxCHAR* fn = d->fileName();
+        Log("openexb: %ls 在册[%d]=%ls", tag, n++, (fn && fn[0]) ? fn : L"(空)");
+    }
+    delete it;
+    Log("openexb: %ls 在册文档数=%d", tag, n);
+}
+
+static void DoOpenExb(int seq, const std::wstring& arg)
+{
+    if (arg.empty())
+    {
+        WriteResp(seq, L"OPEN_EXB", L"ERR", L"参数错误：缺 exb 全路径");
+        return;
+    }
+    if (!crxDocManager)
+    {
+        WriteResp(seq, L"OPEN_EXB", L"ERR", L"图纸文档管理器不可用（不在图纸环境？）");
+        return;
+    }
+
+    std::wstring want = NormPath(arg);
+    CRxApDocument* pTarget = FindDocByPath(want);
+
+    if (!pTarget)
+    {
+        // 通道 A：文档管理器直接打开（官方样例 CRXOpenDocFile 写法，不包 app-context）。
+        int retA = (int)crxDocManager->appContextOpenDocument(arg.c_str());
+        Log("openexb: [A] appContextOpenDocument ret=%d path=%ls", retA, W2U8(arg).c_str());
+        pTarget = WaitDocInRegistry(want, 7000);
+        Log("openexb: [A] 等 7s 后 %ls", pTarget ? L"文档已在册" : L"文档未在册");
+
+        // 通道 B：键入通道直投 CX_open_Impl <路径>。
+        if (!pTarget)
+        {
+            CRxApDocument* pActive = crxDocManager->mdiActiveDocument();
+            if (!pActive)
+            {
+                // 没有「活动」文档但可能有在册文档（预热图纸关掉后常见）：取第一张当键入目标
+                CRxApDocumentIterator* it = crxDocManager->newAcApDocumentIterator();
+                if (it) { if (!it->done()) pActive = it->document(); delete it; }
+            }
+            if (pActive)
+            {
+                std::wstring cmd = L"CX_open_Impl \"" + arg + L"\" ";
+                CDraft::ErrorStatus es = crxDocManager->sendStringToExecute(
+                    pActive, cmd.c_str(), true, false, true);
+                Log("openexb: [B] sendStringToExecute status=%d inputPending=%d cmd=%ls",
+                    (int)es, crxDocManager->inputPending(pActive), W2U8(cmd).c_str());
+                pTarget = WaitDocInRegistry(want, 7000);
+            }
+            else Log("openexb: [B] 跳过（mdiActiveDocument=NULL，无键入目标）");
+            Log("openexb: [B] 等 7s 后 %ls", pTarget ? L"文档已在册" : L"文档未在册");
+        }
+
+        // 通道 C：crxedCommand 原生命令兜底（可写副本：宿主可能往 RTSTR 缓冲区写回）。
+        if (!pTarget)
+        {
+            std::vector<wchar_t> pathBuf(arg.begin(), arg.end());
+            pathBuf.push_back(L'\0');
+            int st = crxedCommand(RTSTR, L"CX_open_Impl", RTSTR, pathBuf.data(), RTNONE);
+            Log("openexb: [C] crxedCommand CX_open_Impl ret=%d", st);
+            pTarget = WaitDocInRegistry(want, 6000);
+            Log("openexb: [C] 等 6s 后 %ls", pTarget ? L"文档已在册" : L"文档未在册");
+        }
+
+        if (!pTarget)
+        {
+            LogOpenDocs(L"三通道均未命中");
+            WriteResp(seq, L"OPEN_EXB", L"ERR",
+                      (std::wstring(L"图纸侧打开 exb 失败（A 文档管理器 / B 键入通道 / C 原生命令，共 20s，") +
+                       L"文档始终未在册；A ret=" + std::to_wstring(retA) + L"）：" + arg).c_str());
+            return;
+        }
+        LogOpenDocs(L"打开成功");
+    }
+    else
+    {
+        Log("openexb: 目标已在册，跳过打开 → %ls", W2U8(BaseNameOfC(want)).c_str());
+    }
+
+    // 激活（后续 SAVE / 导出都作用于「当前文档」）
+    CRxApDocument* pActive = crxDocManager->mdiActiveDocument();
+    if (pActive != pTarget)
+    {
+        CDraft::ErrorStatus as = crxDocManager->activateDocument(pTarget, false);
+        Log("openexb: 切换活动图纸 → %ls status=%d", W2U8(BaseNameOfC(want)).c_str(), (int)as);
+        for (int i = 0; i < 5; ++i) PumpMessages(30);
+    }
+
+    // 沉降拍（见节首注释：不靠 isQuiescent 判完成，只给打开一个 1.5s 沉降拍）
+    DWORD start = GetTickCount();
+    while (GetTickCount() - start < 1500 && !pTarget->isQuiescent()) PumpMessages(120);
+
+    WriteResp(seq, L"OPEN_EXB", L"OK", L"图纸环境侧已打开 → " + BaseNameOfC(want));
+    Log("openexb: %ls OK (quiescent=%d) doc=%ls", W2U8(BaseNameOfC(want)).c_str(),
+        pTarget->isQuiescent() ? 1 : 0, W2U8(want).c_str());
+}
+
 struct CmdEntry
 {
     const wchar_t* name;
@@ -795,6 +1193,10 @@ static const CmdEntry kCmdTable[] =
                                             L"标题栏 3D 信息设默认：4 通道轮换 + TB.diff 判定（结果落日志 REQ.tb-*）" },
     { L"TB_ABORT",         false, true, DoTbAbort,
                                             L"终止标题栏 3D 信息派发与判定（收尾必投）" },
+    { L"CONVERT_DXF", true,  true,  DoConvertDxf,
+                                            L"图纸环境内把目标 exb 经 TDExportControl.Export 转 dxf/dwg/pdf（arg=exb路径|输出路径|eZExportDrawingType；无 UI；★ 2027 实机 GetIDispatch 恒 NULL 已判死，仅留作规则总纲 29④ 拍板候选通道）" },
+    { L"OPEN_EXB",    true,  true,  DoOpenExb,
+                                            L"图纸环境侧打开/激活 exb（arg=exb全路径；A 文档管理器/B 键入 CX_open_Impl/C 原生命令三通道；替代 Scene 侧 OpenFile2 对业务 exb 的退役路线）" },
 };
 
 static const CmdEntry* FindCmd(const std::wstring& action)
@@ -901,7 +1303,7 @@ static void BridgeTick()
     {
         WriteResp(seq, action, L"ERR",
                   L"CRX 不认可该命令：" + action +
-                  L"（可用：PING / CLOSEDOC / CLOSERAW / SAVE / EXEC_NATIVE / TITLEBLOCK_3DSET / TB_ABORT）");
+                  L"（可用：PING / CLOSEDOC / CLOSERAW / SAVE / EXEC_NATIVE / TITLEBLOCK_3DSET / TB_ABORT / CONVERT_DXF / OPEN_EXB）");
         Log("bridge: 未知/未登记命令「%hs」，已拒绝", W2U8(action).c_str());
         g_inTick = false;
         return;

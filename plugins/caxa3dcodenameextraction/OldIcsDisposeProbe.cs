@@ -38,12 +38,12 @@ namespace caxa3dcodenameextraction
             log("probe: 新=" + newIcs + (File.Exists(newIcs) ? "（在盘）" : "（不在盘！）"));
 
             // ── P1：File.Move 试锁（无损：改名后立刻改回）──
-            // 2026-11-05 同步自 caxa3ddiffrename 时删掉了上游的 `bool renameable` 死变量
-            //（赋值后从不读，只产生 CS0219 警告；P1 的结论本来就由下面那行日志给出）。
             string probePath = oldIcs + ".probe";
+            bool renameable = false;
             try
             {
                 File.Move(oldIcs, probePath);
+                renameable = true;
                 try { File.Move(probePath, oldIcs); log("probe: P1 改名 ✔→改回 ✔ ⇒ 锁允许 rename（降级解：可改名让路后由用户删）"); }
                 catch (Exception ex) { log("probe: P1 改回失败！" + ex.Message + "（文件现在叫 " + probePath + "，请手动处理）"); return false; }
             }
