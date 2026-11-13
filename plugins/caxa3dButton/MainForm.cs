@@ -32,27 +32,14 @@ namespace caxa3dButton
         private static volatile bool _stopRequested;
 
         internal static readonly string AppTitleBase = "按钮工具";
-        private const string WarmExbName = "caxa3d图纸环境预热.exb";
 
         private readonly IZBaseApp _siteApp;
         private DrawingNoSepForm _drawNoSepForm;
         private bool _topMost;
-        private bool _warmedOnce;
-        private bool _autoWarmed;
-        private int _warmShown = -1;
         private bool _busy;
-
-        // 心跳探测
-        private int _probeBusy;
-        private long _probeStartTicks;
-        private volatile bool _probeWarm;
-        private long _probeStampTicks;
-        private const int ProbeIntervalMs = 2000;
-        private const int ProbeWatchdogMs = 8000;
 
         // 按钮
         private Button _btnTopMost;
-        private Button _btnWarmUp;
         private Button _btnDrawNoSep;
         private Button _btnLog;
         private Button _btnSaveLog;
@@ -60,11 +47,16 @@ namespace caxa3dButton
         private Button _btnOpenEnv;
         private Button _btnCloseEnv;
         private Button _btnOpenDwg;
+        private Button _btnCube;
+        private Button _btnHideAllTypes;
+        private Button _btnShowAllTypes;
+        private Button _btnAssemblySort;
         private Button _btnStop;
+        private CubeForm _cubeForm;
+        private AssemblySortForm _assemblySortForm;
 
         private Label _lblStatus;
         private TextBox _txtLog;
-        private System.Windows.Forms.Timer _timer;
 
         // ================================================================ 小工具表格区（caxa3dminitool 同款）
         //
@@ -80,7 +72,7 @@ namespace caxa3dButton
         private const int RowHeight = 36;
         private const int HeaderHeight = 38;
         private const int MinColumnWidth = 170;
-        private const int TableTop = 84;          // 表格区顶部（第二行按钮 46+28=74，留 10px）
+        private const int TableTop = 118;         // 表格区顶部（第三行按钮 80+28=108，留 10px）
         private int _tableHeight = HeaderHeight + 5 * RowHeight;   // 5 行（元素处理列最长）
 
         private static readonly string[] ColumnTitles =
@@ -131,48 +123,16 @@ namespace caxa3dButton
             Diagnostics.Log("ui: 工具窗已创建");
         }
 
-        // ↓ 键盘归属抢救（规则第 37 节）
+        // ↑ 键盘归属抢救（规则第 37 节）
         protected override void OnActivated(EventArgs e) { base.OnActivated(e); ChordRescue.Install(this, msg => Diagnostics.Log(msg)); }
         protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); ChordRescue.Uninstall(this, "窗口失活"); }
         protected override void WndProc(ref Message m) { if (ChordRescue.Route(this, ref m)) return; base.WndProc(ref m); }
         // ↑
-
-        protected override void OnShown(EventArgs e)
-        {
-            base.OnShown(e);
-            UpdateWarmUpVisual();
-            if (_timer == null)
-            {
-                _timer = new System.Windows.Forms.Timer { Interval = 1000 };
-                _timer.Tick += delegate { UpdateWarmUpVisual(); };
-            }
-            _timer.Start();
-
-            // 启动时自动预热图纸环境：Timer 1s 后主线程跑 WarmUpDrawingEnv（try/catch 兜住失败，不阻塞 OnShown）
-            if (!_autoWarmed)
-            {
-                _autoWarmed = true;
-                Diagnostics.Log("warm-auto: 工具窗已显示，1 秒后自动触发图纸环境预热 …");
-                var autoTimer = new System.Windows.Forms.Timer { Interval = 1000 };
-                autoTimer.Tick += delegate
-                {
-                    autoTimer.Stop();
-                    autoTimer.Dispose();
-                    try { WarmUpDrawingEnv(); }
-                    catch (Exception ex)
-                    {
-                        Diagnostics.Log("warm-auto: 自动预热失败：" + ex.Message);
-                        SetStatus("自动预热跳过：" + ex.Message, Color.DimGray);
-                    }
-                };
-                autoTimer.Start();
-            }
-        }
+        // 图纸环境预热已上收到集合体主界面（Host 统一预热铁律）：本子插件不再负责预热。
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             _stopRequested = true;
-            try { if (_timer != null) _timer.Stop(); } catch { }
             ChordRescue.Uninstall(this, "工具窗关闭");
             // 小工具收尾（caxa3dminitool 口径）：关窗即置停止标志，不强行保存文件、不强关图纸
             _kernelStopRequested = true;
@@ -191,8 +151,8 @@ namespace caxa3dButton
             Text = AppTitleBase + " - " + BuildVersion();
             Font = new Font("Microsoft YaHei UI", 9F);
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(680, 640);
-            MinimumSize = new Size(696, 560);
+            ClientSize = new Size(680, 674);
+            MinimumSize = new Size(696, 594);
 
             _topMost = true;
             TopMost = true;
@@ -202,20 +162,17 @@ namespace caxa3dButton
             ApplyTopMostVisual(true);
             _btnTopMost.Click += delegate { ToggleTopMost(); };
 
-            _btnWarmUp = MakeButton("图纸环境：未预热", 122, 12, 180);
-            _btnWarmUp.Click += OnWarmUpClick;
-
-            _btnDrawNoSep = MakeButton("图号分离", 312, 12, 110);
+            _btnDrawNoSep = MakeButton("图号分离", 122, 12, 110);
             _btnDrawNoSep.Click += OnDrawNoSepClick;
 
-            _btnLog = MakeButton("日志", 432, 12, 80);
+            _btnLog = MakeButton("日志", 242, 12, 80);
             _btnLog.Click += delegate { ToggleLog(); };
 
-            _btnSaveLog = MakeButton("保存日志", 522, 12, 70);
+            _btnSaveLog = MakeButton("保存日志", 332, 12, 70);
             _btnSaveLog.Visible = false;
             _btnSaveLog.Click += OnSaveLogClick;
 
-            _btnClearLog = MakeButton("清理日志", 602, 12, 70);
+            _btnClearLog = MakeButton("清理日志", 412, 12, 70);
             _btnClearLog.Visible = false;
             _btnClearLog.Click += OnClearLogClick;
 
@@ -229,14 +186,30 @@ namespace caxa3dButton
             _btnOpenDwg = MakeButton("打开工程图", 332, 46, 110);
             _btnOpenDwg.Click += OnOpenDwgClick;
 
+            // 基体模型建立（移植自 caxa3dtracker）
+            // 宽度按 6 个汉字留足（118 在部分 DPI 下会把末字「立」裁掉并与右侧「停止」贴边）
+            _btnCube = MakeButton("基体模型建立", 452, 46, 132);
+            _btnCube.Click += OnCubeClick;
+
             // 「停止」只在长流程期间可用（铁律 6：长等待链必须有停止入口）
-            _btnStop = MakeButton("停止", 452, 46, 80);
+            _btnStop = MakeButton("停止", 594, 46, 76);
             _btnStop.Enabled = false;
             _btnStop.BackColor = Color.FromArgb(200, 60, 60);
             _btnStop.ForeColor = Color.White;
             _btnStop.FlatStyle = FlatStyle.Flat;
             _btnStop.FlatAppearance.BorderSize = 0;
             _btnStop.Click += delegate { StopFlow(); };
+
+            // 第三行：隐藏所有类型 / 显示所有类型（移植自 caxa3dtracker，走 IZSceneDocProperty 类别标志）
+            _btnHideAllTypes = MakeButton("隐藏所有类型", 12, 80, 132);
+            _btnHideAllTypes.Click += delegate { RunShowHideAll(false); };
+
+            _btnShowAllTypes = MakeButton("显示所有类型", 154, 80, 132);
+            _btnShowAllTypes.Click += delegate { RunShowHideAll(true); };
+
+            // 装配体排序（移植自 caxa3dtracker）：弹条件窗，构造期不连 COM
+            _btnAssemblySort = MakeButton("装配体排序", 296, 80, 110);
+            _btnAssemblySort.Click += OnAssemblySortClick;
 
             // ---- 小工具表格区（四列，单元格 = 工具）----
             _grid = BuildGrid();
@@ -250,7 +223,7 @@ namespace caxa3dButton
             _lblStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
             _txtLog = new TextBox();
-            _txtLog.SetBounds(12, TableTop + _tableHeight + 32, 656, 640 - (TableTop + _tableHeight + 32) - 8);
+            _txtLog.SetBounds(12, TableTop + _tableHeight + 32, 656, ClientSize.Height - (TableTop + _tableHeight + 32) - 8);
             _txtLog.Multiline = true;
             _txtLog.ScrollBars = ScrollBars.Vertical;
             _txtLog.ReadOnly = true;
@@ -260,8 +233,9 @@ namespace caxa3dButton
             _txtLog.Visible = false;
 
             Controls.AddRange(new Control[] {
-                _btnTopMost, _btnWarmUp, _btnDrawNoSep, _btnLog, _btnSaveLog, _btnClearLog,
-                _btnOpenEnv, _btnCloseEnv, _btnOpenDwg, _btnStop,
+                _btnTopMost, _btnDrawNoSep, _btnLog, _btnSaveLog, _btnClearLog,
+                _btnOpenEnv, _btnCloseEnv, _btnOpenDwg, _btnCube, _btnStop,
+                _btnHideAllTypes, _btnShowAllTypes, _btnAssemblySort,
                 _grid, _lblStatus, _txtLog });
 
             FillTable();
@@ -453,8 +427,8 @@ namespace caxa3dButton
             }
 
             int clientWidth = Math.Max(680, totalMin + 48);
-            ClientSize = new Size(clientWidth, 640);
-            MinimumSize = new Size(clientWidth + 16, 560);
+            ClientSize = new Size(clientWidth, 674);
+            MinimumSize = new Size(clientWidth + 16, 594);
         }
 
         private void Grid_CellClick(object sender, DataGridViewCellEventArgs e)
@@ -1389,176 +1363,6 @@ namespace caxa3dButton
             Diagnostics.Log("log cleared by user");
         }
 
-        // ================================================================ 图纸环境预热
-
-        private void OnWarmUpClick(object sender, EventArgs e)
-        {
-            if (_busy) return;
-            _busy = true;
-            _btnWarmUp.Enabled = false;
-            try
-            {
-                SetStatus("正在预热图纸环境 …", Color.DarkOrange);
-                WarmUpDrawingEnv();
-            }
-            catch (Exception ex)
-            {
-                SetStatus("预热失败：" + ex.Message, Color.Firebrick);
-                Diagnostics.Log("warm failed: " + ex.Message);
-            }
-            finally
-            {
-                _busy = false;
-                _btnWarmUp.Enabled = true;
-                Interlocked.Exchange(ref _probeStampTicks, 0);
-                UpdateWarmUpVisual();
-            }
-        }
-
-        private void UpdateWarmUpVisual()
-        {
-            if (_btnWarmUp == null || _btnWarmUp.IsDisposed) return;
-
-            bool warm = _probeWarm;
-            int state = warm ? 1 : (_warmedOnce ? 2 : 0);
-            if (state != _warmShown)
-            {
-                _warmShown = state;
-                _btnWarmUp.BackColor = state == 1 ? Color.FromArgb(46, 160, 67)
-                                     : state == 2 ? Color.FromArgb(122, 140, 60)
-                                                  : Color.FromArgb(216, 66, 66);
-                _btnWarmUp.ForeColor = Color.White;
-                _btnWarmUp.FlatStyle = FlatStyle.Flat;
-                _btnWarmUp.FlatAppearance.BorderSize = 0;
-                _btnWarmUp.Text = state == 1 ? "图纸环境：已就绪"
-                                : state == 2 ? "图纸环境：已预热·图纸已关"
-                                             : "图纸环境：未预热";
-            }
-
-            long last = Interlocked.Read(ref _probeStampTicks);
-            bool due = (DateTime.UtcNow.Ticks - last) >= TimeSpan.FromMilliseconds(ProbeIntervalMs).Ticks;
-            if (!due) return;
-            if (Interlocked.CompareExchange(ref _probeBusy, 1, 0) != 0)
-            {
-                long started = Interlocked.Read(ref _probeStartTicks);
-                if (started != 0 && (DateTime.UtcNow.Ticks - started) > TimeSpan.FromMilliseconds(ProbeWatchdogMs).Ticks)
-                    Interlocked.Exchange(ref _probeBusy, 0);
-                return;
-            }
-            Interlocked.Exchange(ref _probeStartTicks, DateTime.UtcNow.Ticks);
-
-            ThreadPool.QueueUserWorkItem(delegate
-            {
-                bool ok = false;
-                try { ok = DrawingProbe.HasActiveDrawing(); }
-                catch { }
-                bool changed = (ok != warm);
-                _probeWarm = ok;
-                Interlocked.Exchange(ref _probeStampTicks, DateTime.UtcNow.Ticks);
-                Interlocked.Exchange(ref _probeStartTicks, 0);
-                Interlocked.Exchange(ref _probeBusy, 0);
-                if (changed && !IsDisposed && !Disposing)
-                {
-                    try { BeginInvoke((MethodInvoker)UpdateWarmUpVisual); } catch { }
-                }
-            });
-        }
-
-        private void WarmUpDrawingEnv()
-        {
-            if (_siteApp == null)
-                throw new InvalidOperationException("未连接 CAXA 3D：无站点对象。");
-
-            if (DrawingProbe.HasActiveDrawing())
-            {
-                _warmedOnce = true;
-                Diagnostics.Log("warm: 已检测到图纸窗口 —— 本会话已是图纸环境（热态），不需要再预热");
-                SetStatus("图纸环境已是热态（已有图纸窗口），无需预热", Color.DarkGreen);
-                return;
-            }
-
-            string exb = FindWarmupExb();
-            if (exb == null)
-                throw new InvalidOperationException(
-                    "未找到预热载体图纸「" + WarmExbName + "」（已按插件目录逐级向上查找）。");
-
-            List<IntPtr> before = DrawingProbe.ListDraftDocs();
-            Diagnostics.Log("warm: 打开前已有 Draft 图纸窗口 " + before.Count + " 个");
-
-            Diagnostics.Log("warm: OpenFile2 打开预热图纸「" + Path.GetFileName(exb) + "」");
-            PumpMessages(800);
-
-            bool ao = false;
-            try { _siteApp.OpenFile2(exb, false, true, out ao); }
-            catch (Exception ex) { Diagnostics.Log("warm: OpenFile2 返回异常（热路径正常）: " + ex.Message); }
-
-            SetStatus("已投打开请求，等图纸窗口出现（最多 20 秒）…", Color.DarkOrange);
-            var fresh = new List<IntPtr>();
-            bool appeared = WaitUntil("等图纸窗口出现", 20000, delegate
-            {
-                fresh.Clear();
-                foreach (IntPtr h in DrawingProbe.ListDraftDocs())
-                    if (!before.Contains(h)) fresh.Add(h);
-                return fresh.Count > 0;
-            }, 400);
-
-            if (!appeared)
-            {
-                Diagnostics.Log("warm: 预热失败 —— 20 秒内没出现新的图纸窗口");
-                throw new InvalidOperationException("预热失败：20 秒内没出现新的图纸窗口（不重试）。");
-            }
-
-            _warmedOnce = true;
-            Diagnostics.Log("warm: 预热成功 —— 出现 " + fresh.Count + " 个新图纸窗口");
-            CloseWarmDocs(fresh);
-        }
-
-        private void CloseWarmDocs(List<IntPtr> docs)
-        {
-            if (docs == null || docs.Count == 0) return;
-            foreach (IntPtr h in docs) DrawingProbe.RequestClose(h);
-
-            bool allGone = WaitUntil("等预热图纸关掉", 15000, delegate
-            {
-                bool alive = false;
-                foreach (IntPtr h in docs) if (DrawingProbe.IsAlive(h)) { alive = true; break; }
-                if (alive)
-                {
-                    string handled = DrawingProbe.AnswerNoOnSaveDialog();
-                    if (handled != null) Diagnostics.Log("warm: " + handled);
-                }
-                return !alive;
-            }, 250);
-
-            if (allGone)
-            {
-                Diagnostics.Log("warm: 预热图纸已不保存关闭");
-                SetStatus("预热完成：图纸环境已焐热，载体图纸已关闭", Color.DarkGreen);
-            }
-            else
-            {
-                Diagnostics.Log("warm: 预热图纸 15 秒内没关掉");
-                SetStatus("预热完成，但载体图纸没关掉（请手工关掉多出来的那张图纸）", Color.DarkOrange);
-            }
-        }
-
-        private static string FindWarmupExb()
-        {
-            string asmDir = null;
-            try { asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location); } catch { }
-            if (!string.IsNullOrEmpty(asmDir))
-            {
-                string cur = asmDir;
-                for (int i = 0; i < 6 && !string.IsNullOrEmpty(cur); i++)
-                {
-                    string p = Path.Combine(cur, WarmExbName);
-                    if (File.Exists(p)) return p;
-                    cur = Path.GetDirectoryName(cur);
-                }
-            }
-            return null;
-        }
-
         // ================================================================ 设计环境开关
 
         private void OnOpenDesignEnvClick(object sender, EventArgs e)
@@ -1697,6 +1501,66 @@ namespace caxa3dButton
             // 仅当现在还停在「正在打开」状态时才追一行，避免覆盖后续 postAction 的状态
             if (_lblStatus != null && _lblStatus.Text.IndexOf("正在打开工程图", StringComparison.Ordinal) >= 0)
                 SetStatus(_lblStatus.Text + "（已自动更新视图）", Color.DarkGreen);
+        }
+
+        // ================================================================ 基体模型建立（移植自 caxa3dtracker）
+
+        /// <summary>单例窗口：弹出基体模型建立界面（长方体 / 圆柱体 / 抽壳圆管 + 智能标注）。</summary>
+        private void OnCubeClick(object sender, EventArgs e)
+        {
+            try
+            {
+                if (_cubeForm == null || _cubeForm.IsDisposed) _cubeForm = new CubeForm(_siteApp, TopMost);
+                if (_cubeForm.Visible) { _cubeForm.Activate(); }
+                else { _cubeForm.Show(this); _cubeForm.Activate(); }
+            }
+            catch (Exception ex)
+            {
+                SetStatus("打开基体模型建立窗口失败：" + ex.Message, Color.Firebrick);
+                Diagnostics.Log("open CubeForm failed: " + ex);
+            }
+        }
+
+        // ================================================================ 显示 / 隐藏所有类型
+        // 移植自 caxa3dtracker（2026-11-13）：走 IZSceneDocProperty 的 10 个类别标志，
+        // 每类「原态 → 设定 → 回读」三态写 trace，回读不一致的类别原样点名。
+
+        private void RunShowHideAll(bool show)
+        {
+            string label = show ? "显示所有类型" : "隐藏所有类型";
+            SetStatus((show ? "正在显示" : "正在隐藏") + "所有类型 …", Color.DarkOrange);
+            try
+            {
+                string verdict = show ? ShowHideTool.ShowAllTypes(_siteApp)
+                                      : ShowHideTool.HideAllTypes(_siteApp);
+                SetStatus(verdict, Color.DimGray);
+                Diagnostics.Log(label + "：" + verdict);
+            }
+            catch (Exception ex)
+            {
+                SetStatus(label + "失败：" + ex.Message, Color.Firebrick);
+                Diagnostics.Log(label + " click failed: " + ex);
+            }
+        }
+
+        // ================================================================ 装配体排序
+        // 移植自 caxa3dtracker（2026-11-13）：弹条件窗（升/降序 + 只排第一层/穿透到底），
+        // 会话推迟到点「执行排序」；排序根＝设计树选中的装配体，未选中时用场景唯一顶层装配。
+
+        private void OnAssemblySortClick(object sender, EventArgs e)
+        {
+            try
+            {
+                if (_assemblySortForm == null || _assemblySortForm.IsDisposed)
+                    _assemblySortForm = new AssemblySortForm(_siteApp, TopMost);
+                if (_assemblySortForm.Visible) { _assemblySortForm.Activate(); }
+                else { _assemblySortForm.Show(this); _assemblySortForm.Activate(); }
+            }
+            catch (Exception ex)
+            {
+                SetStatus("打开装配体排序窗口失败：" + ex.Message, Color.Firebrick);
+                Diagnostics.Log("open AssemblySortForm failed: " + ex);
+            }
         }
 
         // ================================================================ 打开工程图联动动作

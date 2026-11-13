@@ -54,6 +54,8 @@
     <None Include="..\..\restore.ps1" Link="restore.ps1" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\安装.bat" Link="安装.bat" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\卸载.bat" Link="卸载.bat" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 预热载体图纸：全仓唯一基准（根目录），只有 Host 携带（AGENTS 预热铁律：预热归主界面） -->
+    <None Include="..\..\caxa3d图纸环境预热.exb" Link="caxa3d图纸环境预热.exb" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- 工具路径（可用命令行 -p:MtExe=... 覆盖） -->

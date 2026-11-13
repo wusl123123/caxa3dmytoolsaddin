@@ -5,28 +5,35 @@ using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
 using Caxa3dMyTools.Contracts;
+using interop.ICApiIronCAD;
 
 namespace caxa3dmytoolsaddin
 {
     /// <summary>
     /// 我的工具箱主窗口：
-    ///   - 顶部只有「窗口前置」开关（默认开启，点击可切换）；
-    ///   - 主体为两列表格：1.常用插件 / 2.系统工具（2026-11-09 由四列收敛为两列，
-    ///     独立插件列并入系统工具、测试插件列随插件移除而取消）；
-    ///   - 每个插件占一个单元格，单击单元格打开；单元格不折行、不缩小字体，
-    ///     列最小宽度按最长文字实测，窗口最小尺寸随之放大，避免文字被遮挡。
+    ///   - 顶部有「窗口前置」开关（默认开启）＋「图纸环境预热」状态灯（集合体统一预热入口，
+    ///     AGENTS 预热铁律：子插件不带预热 UI / 自动预热 / 预热 .exb）；
+    ///   - 主体为两列表格：1.常用插件 / 2.系统工具；
+    ///   - 每个插件占一个单元格，单击单元格打开。
     /// </summary>
     [System.Runtime.InteropServices.ComVisible(false)]
     public class MainToolboxForm : Form
     {
         private readonly PluginManager _manager;
+        private readonly IZBaseApp _app;   // 预热用站点（null = 未连接，预热按钮提示先连 CAXA）
         private bool _topMost = true;   // 默认前置
 
         private Button _btnTopMost;
+        private Button _btnWarm;
         private Label _lblHint;
         private Panel _panelTop;
         private Panel _panelBody;
         private DataGridView _grid;
+
+        // 预热状态灯：绿 = 已就绪（图纸窗口在 / 本进程预热过），红 = 未预热；每进程只自动预热一次
+        private static bool _autoWarmTried;
+        private int _warmShown = -1;
+        private System.Windows.Forms.Timer _warmTimer;
 
         private const int CellPaddingX = 12;
         private const int RowHeight = 36;
@@ -77,9 +84,10 @@ namespace caxa3dmytoolsaddin
             }
         }
 
-        public MainToolboxForm(PluginManager manager)
+        public MainToolboxForm(PluginManager manager, IZBaseApp app)
         {
             _manager = manager;
+            _app = app;
             BuildUi();
         }
 
@@ -112,6 +120,20 @@ namespace caxa3dmytoolsaddin
             _btnTopMost.FlatAppearance.BorderSize = 0;
             _btnTopMost.Click += (s, e) => ToggleTopMost();
 
+            // === 「图纸环境预热」状态灯按钮（集合体统一预热入口） ===
+            _btnWarm = new Button
+            {
+                Text = "图纸环境：未预热",
+                Location = new Point(BodyPadding + 110, 9),
+                Size = new Size(170, 30),
+                BackColor = Color.FromArgb(216, 66, 66),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Microsoft YaHei UI", 9F)
+            };
+            _btnWarm.FlatAppearance.BorderSize = 0;
+            _btnWarm.Click += (s, e) => WarmClick();
+
             _lblHint = new Label
             {
                 Dock = DockStyle.Right,
@@ -124,6 +146,7 @@ namespace caxa3dmytoolsaddin
 
             _panelTop.Controls.Add(_lblHint);
             _panelTop.Controls.Add(_btnTopMost);
+            _panelTop.Controls.Add(_btnWarm);
 
             // === 主体：四列表格 ===
             _panelBody = new Panel
@@ -368,6 +391,90 @@ namespace caxa3dmytoolsaddin
                 _btnTopMost.ForeColor = SystemColors.ControlText;
                 _btnTopMost.FlatStyle = FlatStyle.Standard;
             }
+        }
+
+        // ================================================================ 图纸环境预热（集合体统一入口）
+
+        /// <summary>
+        /// 显示时刷新状态灯；每进程只自动预热一次（AGENTS 预热铁律：主界面统一预热，不反复预热）。
+        /// 自动预热放 1 秒定时器里跑，让窗口先画完；失败只写日志不弹框。
+        /// </summary>
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            UpdateWarmVisual();
+            if (_warmTimer == null)
+            {
+                _warmTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+                _warmTimer.Tick += delegate { UpdateWarmVisual(); };
+            }
+            _warmTimer.Start();
+
+            if (!_autoWarmTried)
+            {
+                _autoWarmTried = true;
+                Diagnostics.Log("warm-auto: 主工具箱已显示，1 秒后自动预热图纸环境（每进程一次）…");
+                var auto = new System.Windows.Forms.Timer { Interval = 1000 };
+                auto.Tick += delegate
+                {
+                    auto.Stop();
+                    auto.Dispose();
+                    try { DrawingWarmup.EnsureWarm(_app, m => Diagnostics.Log(m)); }
+                    catch (Exception ex) { Diagnostics.Log("warm-auto: 自动预热失败：" + ex.Message); }
+                    UpdateWarmVisual();
+                };
+                auto.Start();
+            }
+        }
+
+        /// <summary>手动点「图纸环境预热」状态灯：已热秒回（不重复预热），冷态走唯一预热直线（UI 线程，内部泵消息）。</summary>
+        private void WarmClick()
+        {
+            if (_app == null)
+            {
+                MessageBox.Show("尚未连接 CAXA 3D，无法预热。", "我的工具箱",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (DrawingWarmup.IsWarm() || DrawingWarmup.WarmedOnce)
+            {
+                Diagnostics.Log("warm: 已是热态 —— 不重复预热");
+                UpdateWarmVisual();
+                return;
+            }
+            _btnWarm.Enabled = false;
+            _btnWarm.Text = "预热中…";
+            try
+            {
+                DrawingWarmup.WarmNow(_app, m => Diagnostics.Log(m));
+            }
+            catch (Exception ex)
+            {
+                Diagnostics.Log("warm: 预热异常：" + ex.Message);
+            }
+            finally
+            {
+                _btnWarm.Enabled = true;
+                UpdateWarmVisual();
+            }
+        }
+
+        /// <summary>两态状态灯：绿 = 已就绪（图纸窗口在 / 本进程预热过），红 = 未预热。</summary>
+        private void UpdateWarmVisual()
+        {
+            if (_btnWarm == null || _btnWarm.IsDisposed) return;
+            bool warm = DrawingWarmup.IsWarm() || DrawingWarmup.WarmedOnce;
+            int state = warm ? 1 : 0;
+            if (state == _warmShown) return;
+            _warmShown = state;
+            _btnWarm.BackColor = state == 1 ? Color.FromArgb(46, 160, 67) : Color.FromArgb(216, 66, 66);
+            _btnWarm.Text = state == 1 ? "图纸环境：已就绪" : "图纸环境：未预热";
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            try { if (_warmTimer != null) { _warmTimer.Stop(); _warmTimer.Dispose(); } } catch { }
+            base.OnFormClosed(e);
         }
     }
 }

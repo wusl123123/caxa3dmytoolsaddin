@@ -166,10 +166,10 @@ namespace caxa3dsheetmaster
 
             short b;
             int i;
-            if (TryReadShortProp(pSm, SlotSmGetUseDin6935, "probe SM.get_UseDIN6935", out b))
-                sb.AppendLine(string.Format("      {0,-26} slot {1,-3} = {2}", "UseDIN6935", SlotSmGetUseDin6935, b != 0));
+            if (TryReadShortProp(pSm, SlotSmGetUseDIN6935, "probe SM.get_UseDIN6935", out b))
+                sb.AppendLine(string.Format("      {0,-26} slot {1,-3} = {2}", "UseDIN6935", SlotSmGetUseDIN6935, b != 0));
             else
-                sb.AppendLine(string.Format("      {0,-26} slot {1,-3} = 读失败", "UseDIN6935", SlotSmGetUseDin6935));
+                sb.AppendLine(string.Format("      {0,-26} slot {1,-3} = 读失败", "UseDIN6935", SlotSmGetUseDIN6935));
 
             if (TryReadShortProp(pSm, SlotSmGetIsFolded, "probe SM.get_IsFolded", out b))
                 sb.AppendLine(string.Format("      {0,-26} slot {1,-3} = {2}", "IsFolded", SlotSmGetIsFolded, b != 0));

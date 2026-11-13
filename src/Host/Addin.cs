@@ -120,7 +120,7 @@ namespace caxa3dmytoolsaddin
             {
                 Diagnostics.Log("Toolbox_OnClick: enter");
                 if (_toolboxForm == null || _toolboxForm.IsDisposed)
-                    _toolboxForm = new MainToolboxForm(_manager);
+                    _toolboxForm = new MainToolboxForm(_manager, _site != null ? _site.Application : null);
 
                 if (_toolboxForm.Visible) _toolboxForm.Activate();
                 else { _toolboxForm.Show(); _toolboxForm.Activate(); }

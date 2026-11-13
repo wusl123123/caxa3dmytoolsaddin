@@ -55,10 +55,7 @@
     <!-- 图纸环境 CRX 桥（源码在 Bridge\，产物由 msbuild 工程编译；部署时按第 5 登记点投放到 CAXADraft\bin） -->
     <None Update="Bridge\bin\caxa3dBatchMasterView.crx" Link="caxa3dBatchMasterView.crx"
           CopyToOutputDirectory="PreserveNewest" />
-    <!-- 图纸环境预热载体：基准 = 集合体项目根目录那份（全仓唯一，Link 引用不拷副本） -->
-    <None Include="$(MSBuildProjectDirectory)\..\..\caxa3d图纸环境预热.exb"
-          Link="caxa3d图纸环境预热.exb" CopyToOutputDirectory="PreserveNewest"
-          Condition="Exists('$(MSBuildProjectDirectory)\..\..\caxa3d图纸环境预热.exb')" />
+    <!-- 预热载体图纸已剥离（AGENTS 预热铁律）：只有 Host 携带，安装根 = 插件目录上一级，ViewBridge 逐级向上能找到 -->
   </ItemGroup>
 
   <!--

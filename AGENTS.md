@@ -58,3 +58,15 @@ python gh_api_push.py
 1. `git status` 中不得出现：`.snk`、`bin/`、`obj/`、`项目总结`、`.crx`、`.screenshots/`。
 2. 提交信息用 `feat:` / `fix:` / `chore:` 前缀，正文列要点。
 3. 顺序：提交 `master` → 推 Gitee 并校验 → 合并进 `main` → API 推 GitHub 并校验 → 两边文件数一致。
+
+---
+
+## 5. 预热铁律（2026-11-13：图纸环境预热统一上收主界面）
+
+图纸环境预热的**入口与载体只允许存在于集合体主界面（Host）**，子插件一律剥离：
+
+1. **预热入口**：`MainToolboxForm` 顶栏「图纸环境预热」状态灯（绿=已就绪 / 红=未预热）＋ OnShown 后 1 秒自动预热，**每进程只自动跑一次**（static 记账）；已热（窗口判据或本进程预热过）只秒回不重复预热。
+2. **唯一实现**：预热引擎在 `src\Contracts\DrawingWarmup.cs`（窗口结构判据 + OpenFile2 唯一直线 + 载体立即不保存关闭）。子插件业务流程确需热环境时只允许调它（UI 线程）——不得再写第二份引擎。
+3. **子插件入库禁带**：预热按钮 / 状态灯 / 启动自动预热 / `caxa3d图纸环境预热.exb`（csproj 的 None Include 与 bin/暂存副本一并删除）。发布核对单第 1 条同口径：`git status` 里出现子插件目录的预热 .exb 即打回。
+4. **例外（业务安全兜底，不算预热入口）**：子插件流程内部的按需预热调用可保留——codenameextraction `WarmUpDrawingEnv(closeRightAway)`（坑 148 防崩：流程内留载体至目标 exb 打开）、BatchMaster `ViewBridge.WarmUpDrawingEnv`（后台线程 + 自有 CRX CLOSERAW）。这些调用不得注册成 UI 按钮、不得在 OnShown/构造期自动触发、不得自带 .exb。
+5. **载体部署**：exb 只随 Host 输出走（deploy.ps1 白名单拷到 CAXA bin 根），`DrawingWarmup.FindExb` 从 Contracts.dll 位置逐级向上找（安装布局下 bin 根即命中）；子插件目录出现该文件即视为部署残留。

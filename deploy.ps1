@@ -6,6 +6,11 @@
     设计约束（踩坑后固化）：
       * 本脚本必须保存为“单个 UTF-8 BOM”，否则 Windows PowerShell 5.1 按 GBK 解码，
         中文会吞掉引号/换行并静默崩溃。
+      * ★ 2026-11-13 预热铁律：caxa3d图纸环境预热.exb 只随主程序交付件根目录走，
+        本脚本白名单拷到 CAXA bin 根（DrawingWarmup.FindExb 从 Contracts.dll 位置逐级向上可达）；
+        子插件目录里出现该文件一律判部署残留并清除，绝不随子插件分发。
+      * ★ 共享清单 CxAutorun.cx 只动自己那一行，且带三道防线（写前 [xml] 校验 / 写盘 /
+        写后回读校验 + 条目落在 </Modules> 之内），任一步失败自动回滚（坑 167/168）。
       * 只对“干净状态”做一次备份（*.bak，覆盖式），不制造大量时间戳备份。
       * 只有确认 DLL 内嵌了 SxS 清单，才登记 manifest dependency；
         否则登记一个无清单的依赖会让 CAXA 启动失败。
@@ -21,7 +26,14 @@ param(
     [switch]$Yes
 )
 
-$ScriptVersion = '2026-11-07.1'
+# ★ 铁律 11：每轮脚本执行都重置两个输出日志（提权重启会再跑一次，无副作用）。
+# 只清本集合体自己的两份（子插件的 _crx.log 由各 CRX 加载时自行截断，铁律 10）。
+foreach ($suffix in @('_trace.log', '_crx.log')) {
+    $logPath = Join-Path $env:TEMP ('caxa3dmytoolsaddin' + $suffix)
+    if (Test-Path $logPath) { Remove-Item $logPath -Force -ErrorAction SilentlyContinue }
+}
+
+$ScriptVersion = '2026-11-13.1'
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = if ($WorkRoot) { $WorkRoot } else { $PSScriptRoot }
@@ -53,6 +65,8 @@ Write-Host ""
 $hostName      = 'caxa3dmytoolsaddin'
 $clsid         = '{6F1A9C24-3B57-4E8D-9A02-5C7D1E8B4F36}'
 $contractsName = 'Caxa3dMyTools.Contracts.dll'
+# 预热载体：交付件根目录那一份，只有 Host 携带（AGENTS 第 5 节）
+$warmExbName   = 'caxa3d图纸环境预热.exb'
 
 # 「2. 独立插件」列的后台进程清理工具：DLL 是启动器，EXE 是真正干活的进程外工具
 $idcPluginName = 'caxa3didcskill'
@@ -353,6 +367,111 @@ $crxItems = @(
 )
 
 # ================================================================ 通用工具
+
+# ---------- 共享清单 Modules\CxAutorun.cx 安全改写（坑 167/168 三道防线） ----------
+# 背景：往共享清单「追加」一行时若落到 </Modules> 之后，整份 XML 解析失败 ⇒ 别人的 CRX
+# 全部不加载且一行错都不报；卸载只删 .crx 不清登记行 ⇒ 宿主启动期 LoadLibrary 悬空引用闪退。
+# 三个判据缺一不可：XML 合法 / 条目位置在 <Modules> 之内 / 节点数变化与命中行数吻合。
+function Test-CxWellFormed([string]$text) {
+    try {
+        [xml]$doc = $text.TrimStart([char]0xFEFF)
+        return ($doc.DocumentElement.LocalName -eq 'Modules')
+    } catch { return $false }
+}
+
+function Test-CxEntryInsideModules([string]$text, [string]$crxName) {
+    try {
+        $clean = $text.TrimStart([char]0xFEFF)
+        [xml]$doc = $clean
+        $open  = $clean.IndexOf('<Modules')
+        $close = $clean.LastIndexOf('</Modules>')
+        $pos   = $clean.IndexOf($crxName)
+        if ($open -lt 0 -or $close -le $open -or $pos -lt $open -or $pos -gt $close) { return $false }
+        foreach ($n in @($doc.SelectNodes("//*[local-name()='File']"))) {
+            if ($n.InnerText -like "*$crxName*") { return $true }
+        }
+        return $false
+    } catch { return $false }
+}
+
+function Get-CxFileNodeCount([string]$text) {
+    [xml]$doc = $text.TrimStart([char]0xFEFF)
+    return @($doc.SelectNodes("//*[local-name()='File']")).Count
+}
+
+# 写回时保持原文件 BOM 状态（宿主清单原本带 BOM；新建的也带 BOM）
+function Write-CxText([string]$path, [string]$text, [bool]$withBom) {
+    [IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($withBom)))
+}
+
+# 追加本插件的一条登记；返回 OK / SKIP / FAIL:<原因>，FAIL 时原文件已回滚或未落盘。
+function Set-CxAutorunEntry([string]$cxPath, [string]$crxPath) {
+    $crxName = Split-Path -Leaf $crxPath
+    $origBytes = $null
+    $hadBom = $true
+    try {
+        if (Test-Path $cxPath) {
+            $origBytes = [IO.File]::ReadAllBytes($cxPath)
+            $hadBom = ($origBytes.Length -ge 3 -and $origBytes[0] -eq 0xEF -and $origBytes[1] -eq 0xBB -and $origBytes[2] -eq 0xBF)
+            $cx = [IO.File]::ReadAllText($cxPath).TrimStart([char]0xFEFF)
+            if ($cx -like "*$crxName*") {
+                if (Test-CxEntryInsideModules $cx $crxName) { return 'SKIP' }
+                return 'FAIL:已有登记但不在 </Modules> 之内（未改动原文件，请人工检查）'
+            }
+        } else {
+            $cx = '<?xml version="1.0" encoding="utf-8"?>' + [Environment]::NewLine +
+                  '<Modules>' + [Environment]::NewLine + '</Modules>' + [Environment]::NewLine
+            New-Item -ItemType Directory -Path (Split-Path -Parent $cxPath) -Force | Out-Null
+        }
+        $idx = $cx.LastIndexOf('</Modules>')
+        if ($idx -lt 0) { return 'FAIL:缺少 </Modules> 锚点（未写盘）' }
+        $line   = '  <File Template="ID_DFT_TMPL">' + $crxPath + '</File>'
+        $newCx  = $cx.Substring(0, $idx) + $line + [Environment]::NewLine + $cx.Substring($idx)
+        # ① 写盘前内存校验：坏就不写
+        if (-not (Test-CxWellFormed $newCx)) { return 'FAIL:写盘前 XML 校验不通过（未写盘）' }
+        if (-not (Test-CxEntryInsideModules $newCx $crxName)) { return 'FAIL:写盘前条目位置校验不通过（未写盘）' }
+        # ② 写盘
+        Write-CxText $cxPath $newCx $hadBom
+        # ③ 写盘后回读再校验
+        $back = [IO.File]::ReadAllText($cxPath).TrimStart([char]0xFEFF)
+        if (-not (Test-CxWellFormed $back)) { throw '写盘后回读 XML 不合法' }
+        if (-not (Test-CxEntryInsideModules $back $crxName)) { throw '写盘后回读条目不在 </Modules> 之内' }
+        return 'OK'
+    } catch {
+        try {
+            if ($null -ne $origBytes) { [IO.File]::WriteAllBytes($cxPath, $origBytes) }
+            elseif (Test-Path $cxPath) { Remove-Item $cxPath -Force }
+        } catch { }
+        return ('FAIL:' + $_.Exception.Message + '（已回滚）')
+    }
+}
+
+# 手术式删掉自己那一行（保 BOM + 删后仍是合法 XML + 节点数变化吻合 + 失败回滚）
+function Remove-CxAutorunLine([string]$cxPath, [string]$crxName) {
+    if (-not (Test-Path $cxPath)) { return 'SKIP' }
+    $origBytes = [IO.File]::ReadAllBytes($cxPath)
+    $hadBom = ($origBytes.Length -ge 3 -and $origBytes[0] -eq 0xEF -and $origBytes[1] -eq 0xBB -and $origBytes[2] -eq 0xBF)
+    try {
+        $cx = [IO.File]::ReadAllText($cxPath).TrimStart([char]0xFEFF)
+        if (-not ($cx -like "*$crxName*")) { return 'SKIP' }
+        if (-not (Test-CxWellFormed $cx)) { return 'FAIL:原 CxAutorun.cx 不是合法 XML（未改动）' }
+        $before = Get-CxFileNodeCount $cx
+        $rx = '(?im)^[^\r\n]*' + [regex]::Escape($crxName) + '[^\r\n]*(?:\r?\n|$)'
+        $hits = @([regex]::Matches($cx, $rx)).Count
+        $newCx = [regex]::Replace($cx, $rx, '')
+        if (-not (Test-CxWellFormed $newCx)) { return 'FAIL:删行后 XML 校验不通过（未写盘）' }
+        if (($before - (Get-CxFileNodeCount $newCx)) -ne $hits) {
+            return 'FAIL:删行数与 File 节点数变化不吻合（未写盘，防止误删兄弟插件条目）'
+        }
+        Write-CxText $cxPath $newCx $hadBom
+        $back = [IO.File]::ReadAllText($cxPath).TrimStart([char]0xFEFF)
+        if (-not (Test-CxWellFormed $back) -or ($back -like "*$crxName*")) { throw '写盘后回读校验不通过' }
+        return 'OK'
+    } catch {
+        try { [IO.File]::WriteAllBytes($cxPath, $origBytes) } catch { }
+        return ('FAIL:' + $_.Exception.Message + '（已回滚）')
+    }
+}
 
 function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -721,25 +840,34 @@ foreach ($v in $versions) {
         Write-Host "[1/5] 当前已含本程序登记，跳过备份（避免脏备份）"
     }
 
-    # ---------- 2. 主程序与契约 ----------
+    # ---------- 2. 主程序、契约、预热载体（三件都落 CAXA bin 根） ----------
+    # 预热 .exb 是硬缺件：缺失时主界面「图纸环境预热」只能静默降级，绝不能软跳过。
     $copyOk = $true
-    foreach ($item in @(
-            @{ Src = $dllPath; Dst = (Join-Path $caxaBin "$hostName.dll") },
-            @{ Src = (Join-Path $hostOutDir $contractsName); Dst = (Join-Path $caxaBin $contractsName) })) {
+    $warmExbSrc = Join-Path $hostOutDir $warmExbName
+    $hostFiles = @(
+            @{ Src = $dllPath;      Dst = (Join-Path $caxaBin "$hostName.dll") },
+            @{ Src = (Join-Path $hostOutDir $contractsName); Dst = (Join-Path $caxaBin $contractsName) },
+            @{ Src = $warmExbSrc;   Dst = (Join-Path $caxaBin $warmExbName) })
+    foreach ($item in $hostFiles) {
         try {
             if (-not (Test-Path $item.Src)) { throw "源文件不存在：$($item.Src)" }
             Copy-Item $item.Src $item.Dst -Force -ErrorAction Stop
         } catch {
             Write-Host "[2/5] 拷贝失败 $($item.Dst) -> $($_.Exception.Message)" -ForegroundColor Red
+            if ($item.Src -eq $warmExbSrc) {
+                Write-Host "      预热载体缺失：主界面「图纸环境预热」将不可用；请确认交付件根目录带 $warmExbName" -ForegroundColor Yellow
+            }
             Write-Host "      请先完全退出 CAXA（含后台无窗口进程）后重试。" -ForegroundColor Yellow
             $copyOk = $false
         }
     }
+    if (-not $copyOk) { $hadError = $true; continue }
+    Write-Host "[2/5] 主程序 / 契约 / 预热载体已拷贝到 $caxaBin"
+
+    # pdb 只是调试符号，拷不上不影响运行
     if ($pdbPath -and (Test-Path $pdbPath)) {
         try { Copy-Item $pdbPath (Join-Path $caxaBin "$hostName.pdb") -Force -ErrorAction Stop } catch { }
     }
-    if (-not $copyOk) { $hadError = $true; continue }
-    Write-Host "[2/5] 主程序与契约已拷贝到 $caxaBin"
 
     # ---------- 3. 子插件目录 ----------
     $pluginDst = Join-Path (Join-Path $caxaBin $hostName) 'plugins'
@@ -755,6 +883,16 @@ foreach ($v in $versions) {
         } catch {
             Write-Host "[3/5] 插件拷贝失败 $($sub.Name) -> $($_.Exception.Message)" -ForegroundColor Red
             $hadError = $true
+        }
+    }
+    # 部署双向清残留：旧版交付件在子插件目录里带过预热 .exb，装新版时必须就地清掉，
+    # 否则安装后 plugins\<插件名>\ 下仍留残件（AGENTS 第 5 节：子插件目录出现即打回）。
+    foreach ($staleExb in @(Get-ChildItem $pluginDst -Recurse -File -Filter $warmExbName -ErrorAction SilentlyContinue)) {
+        try {
+            Remove-Item $staleExb.FullName -Force -ErrorAction Stop
+            Write-Host "[3/5] 已清除子插件目录下的预热载体残留：$($staleExb.FullName)" -ForegroundColor Yellow
+        } catch {
+            Write-Host "[3/5] 警告：预热载体残留清除失败 $($staleExb.FullName)" -ForegroundColor Yellow
         }
     }
     Write-Host "[3/5] 子插件已拷贝到 $pluginDst"
@@ -780,27 +918,18 @@ foreach ($v in $versions) {
         } catch {
             Write-Host "[3b/5] CRX 拷贝失败（CAXA 正在运行？）：$($_.Exception.Message)" -ForegroundColor Red
             $hadError = $true
+            # 文件没就位就绝不登记：悬空的 CxAutorun.cx 条目会让宿主启动期 LoadLibrary 失败（坑 168 同族）
+            continue
         }
-        try {
-            if (Test-Path $crxAutorun) {
-                $cx = [IO.File]::ReadAllText($crxAutorun)
-                if ($cx -notlike "*$crxDst*") {
-                    $line = '  <File Template="ID_DFT_TMPL">' + $crxDst + '</File>'
-                    $cx = $cx.Replace('</Modules>', $line + [Environment]::NewLine + '</Modules>')
-                    Write-TextWithBom $crxAutorun $cx
-                    Write-Host "[3b/5] 已登记 Modules\CxAutorun.cx"
-                } else {
-                    Write-Host "[3b/5] CxAutorun.cx 已存在登记项（跳过）"
-                }
-            } else {
-                New-Item -ItemType Directory -Path (Split-Path -Parent $crxAutorun) -Force | Out-Null
-                $cx = @('<?xml version="1.0" encoding="utf-8"?>', '<Modules>',
-                        ('  <File Template="ID_DFT_TMPL">' + $crxDst + '</File>'), '</Modules>', '') -join [Environment]::NewLine
-                Write-TextWithBom $crxAutorun $cx
-                Write-Host "[3b/5] 已新建 CxAutorun.cx 并登记"
-            }
-        } catch {
-            Write-Host "[3b/5] CxAutorun.cx 登记失败：$($_.Exception.Message)" -ForegroundColor Red
+        # 共享清单只动自己那一行：Set-CxAutorunEntry 内含写前/写盘/写后三道防线 + 失败回滚，
+        # 幂等（已有合法登记返回 SKIP），且保证条目落在 </Modules> 之内（坑 167/168）。
+        $cxResult = Set-CxAutorunEntry $crxAutorun $crxDst
+        if ($cxResult -eq 'OK') {
+            Write-Host "[3b/5] 已登记 Modules\CxAutorun.cx（三道防线通过）"
+        } elseif ($cxResult -eq 'SKIP') {
+            Write-Host "[3b/5] CxAutorun.cx 已存在合法登记项（跳过）"
+        } else {
+            Write-Host "[3b/5] $crxName 登记失败：$cxResult" -ForegroundColor Red
             $hadError = $true
         }
     }
@@ -808,24 +937,21 @@ foreach ($v in $versions) {
     # ---------- 3c. 已下线的图纸环境 CRX 桥清理（文件 + CxAutorun.cx 旧登记行） ----------
     foreach ($stale in $removedCrxs) {
         $staleBin = Join-Path $crxBinDir $stale
-        if (Test-Path $staleBin) {
+        # ① 先摘登记：悬空的 CxAutorun.cx 条目会让宿主启动期 LoadLibrary 失效 CRX 而闪退（坑 168）。
+        $cxResult = Remove-CxAutorunLine $crxAutorun $stale
+        if ($cxResult -eq 'OK') {
+            Write-Host "[3b/5] 已移除 CxAutorun.cx 旧登记：$stale"
+        } elseif ($cxResult -like 'FAIL:*') {
+            Write-Host "[3b/5] 警告：CxAutorun.cx 旧登记清理失败：$cxResult" -ForegroundColor Yellow
+            $hadError = $true
+        }
+        # ② 再删文件（登记没摘干净时不删，避免留下悬空引用）
+        if ($cxResult -notlike 'FAIL:*' -and (Test-Path $staleBin)) {
             try {
                 Remove-Item $staleBin -Force -ErrorAction Stop
                 Write-Host "[3b/5] 已清除已下线 CRX 桥：$staleBin"
             } catch {
                 Write-Host "[3b/5] 警告：旧 CRX 清理失败 $stale -> $($_.Exception.Message)" -ForegroundColor Yellow
-            }
-        }
-        if (Test-Path $crxAutorun) {
-            try {
-                $cx = [IO.File]::ReadAllText($crxAutorun)
-                $cleaned = (($cx -split "`r?`n") | Where-Object { $_ -notlike "*$stale*" }) -join "`r`n"
-                if ($cleaned -ne $cx) {
-                    Write-TextWithBom $crxAutorun $cleaned
-                    Write-Host "[3b/5] 已移除 CxAutorun.cx 旧登记：$stale"
-                }
-            } catch {
-                Write-Host "[3b/5] 警告：CxAutorun.cx 旧登记清理失败 -> $($_.Exception.Message)" -ForegroundColor Yellow
             }
         }
     }
@@ -919,11 +1045,29 @@ foreach ($v in $deployed) {
     $okCfg  = (Test-Path $configFile) -and ((Select-String -Path $configFile -Pattern "$hostName.dll" -SimpleMatch -ErrorAction SilentlyContinue) -ne $null)
     $okDep  = (-not $hasManifest) -or ((Test-Path $manifestFile) -and ((Select-String -Path $manifestFile -Pattern "`"$hostName`"" -SimpleMatch -ErrorAction SilentlyContinue) -ne $null))
     $okReg  = Test-Path "HKCU:\SOFTWARE\CAXA\CAXA 3D $verTag\Applications\$hostName"
+
+    # 预热载体在 bin 根、子插件目录零残留（AGENTS 第 5 节）
+    $okWarmExb = Test-Path (Join-Path $caxaBin $warmExbName)
+    $okNoPluginExb = (@(Get-ChildItem (Join-Path $caxaBin "$hostName\plugins") -Recurse -File -Filter $warmExbName -ErrorAction SilentlyContinue).Count -eq 0)
+
+    # CxXml：共享清单必须仍是合法 XML，且本插件每条登记都落在 </Modules> 之内（坑 167）
+    $cxFile = Join-Path $caxaBin 'CAXADraft\Modules\CxAutorun.cx'
+    $okCxXml = $false
+    if (Test-Path $cxFile) {
+        $cxText = [IO.File]::ReadAllText($cxFile).TrimStart([char]0xFEFF)
+        $okCxXml = Test-CxWellFormed $cxText
+        if ($okCxXml) {
+            foreach ($crxItem in $crxItems) {
+                if (-not (Test-CxEntryInsideModules $cxText $crxItem.Crx)) { $okCxXml = $false }
+            }
+        }
+    }
+
     $okCrxList = @()
     foreach ($crxItem in $crxItems) {
         $n = $crxItem.Crx
         $onBin = Test-Path (Join-Path $caxaBin "CAXADraft\bin\$n")
-        $onCx  = (Select-String -Path (Join-Path $caxaBin 'CAXADraft\Modules\CxAutorun.cx') -Pattern $n -SimpleMatch -ErrorAction SilentlyContinue) -ne $null
+        $onCx  = (Select-String -Path $cxFile -Pattern $n -SimpleMatch -ErrorAction SilentlyContinue) -ne $null
         $okCrxList += ('{0}={1}/{2}' -f $n, $onBin, $onCx)
         if (-not ($onBin -and $onCx)) { $hadError = $true }
     }
@@ -931,11 +1075,12 @@ foreach ($v in $deployed) {
     $okIdcExe = Test-Path (Join-Path $caxaBin "$hostName\plugins\$idcPluginName\$idcExeName")
     $okIdcLoose = -not (Test-Path (Join-Path $caxaBin $idcExeName))
 
-    Write-Host ("CAXA 3D {0}: DLL={1} config={2} manifest={3} registry={4} CRX={5} 独立插件={6}/{7} 无散放EXE={8}" -f $v.Name, $okFile, $okCfg, $okDep, $okReg, ($okCrxList -join ' '), $okIdcDll, $okIdcExe, $okIdcLoose)
-    if (-not ($okFile -and $okCfg -and $okDep -and $okReg -and $okIdcDll -and $okIdcExe -and $okIdcLoose)) { $hadError = $true }
+    Write-Host ("CAXA 3D {0}: DLL={1} config={2} manifest={3} registry={4} 预热载体={5} 子插件无exb={6} CxXml={7} CRX={8} 独立插件={9}/{10} 无散放EXE={11}" -f $v.Name, $okFile, $okCfg, $okDep, $okReg, $okWarmExb, $okNoPluginExb, $okCxXml, ($okCrxList -join ' '), $okIdcDll, $okIdcExe, $okIdcLoose)
+    if (-not ($okFile -and $okCfg -and $okDep -and $okReg -and $okWarmExb -and $okNoPluginExb -and $okCxXml -and $okIdcDll -and $okIdcExe -and $okIdcLoose)) { $hadError = $true }
 }
 
 Write-Host ""
-Write-Host "安装完成。日志：%TEMP%\caxa3dmytoolsaddin_trace.log" -ForegroundColor Green
+Write-Host "安装完成。日志：%TEMP%\caxa3dmytoolsaddin_trace.log（本轮脚本启动时已重置）" -ForegroundColor Green
+Write-Host "预热载体：$warmExbName 已在 CAXA bin 根；子插件目录不带该文件。" -ForegroundColor Green
 if ($hadError) { Write-Host "注意：上面有失败项，请按提示处理后重新运行。" -ForegroundColor Yellow }
 if ($Host.Name -eq 'ConsoleHost' -and -not $Yes) { Read-Host '按回车退出' }

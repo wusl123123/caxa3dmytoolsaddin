@@ -49,11 +49,6 @@ namespace caxa3dBatchMaster
         private readonly Button _btnSplit = new Button();
         // 11-10 用户指令：「分类打包」紧挨「图号分离」右侧
         private readonly Button _btnPackage = new Button();
-        // 11-10 追加（参考 caxa3dButton）：「图纸环境预热」紧挨「分类打包」右侧
-        private readonly Button _btnWarmup = new Button();
-        private readonly Panel _pnlWarmup = new Panel();
-        private readonly ToolTip _warmupTip = new ToolTip();
-        private bool _warmupDone;
         private readonly Button _btnTop = new Button();
         private readonly Button _btnRefreshTable = new Button();
         private readonly Button _btnSelectTable = new Button();
@@ -67,7 +62,6 @@ namespace caxa3dBatchMaster
         private readonly ContextMenuStrip _colMenu = new ContextMenuStrip();
         private readonly ContextMenuStrip _rowMenu = new ContextMenuStrip();
         private readonly System.Windows.Forms.Timer _selSyncTimer = new System.Windows.Forms.Timer { Interval = 200 };
-        private bool _autoWarmFired;   // 自动预热只发一次（用户 2026-11-12 指令：带预热的子插件开启后自动预热图纸环境）
         private string _tablePath = "";
 
         public MainForm(IZBaseApp app)
@@ -115,11 +109,6 @@ namespace caxa3dBatchMaster
             // 同时去掉「CAXA 3D 已连接 (29.0)」状态字样（内置插件无需显示连接关系），状态标签隐藏后腾出 160px。
             _btnSplit.SetBounds(636, 8, 88, 28); _btnSplit.Text = "图号分离";
             _btnPackage.SetBounds(730, 8, 88, 28); _btnPackage.Text = "分类打包";
-            // 11-10 追加（参考 caxa3dButton）：「图纸环境预热」紧挨「分类打包」右侧
-            _btnWarmup.SetBounds(824, 8, 88, 28); _btnWarmup.Text = "图纸环境预热";
-            _pnlWarmup.SetBounds(920, 13, 20, 20); _pnlWarmup.BorderStyle = BorderStyle.Fixed3D;
-            _warmupTip.SetToolTip(_pnlWarmup, "图纸环境状态：红=未预热 / 黄绿=已预热·载体已关 / 绿=已就绪");
-            _warmupTip.SetToolTip(_btnWarmup, "打开专用空图纸把 CRX 桥带起来并关掉载体，使 2D 转换(dwg/dxf/pdf)可用");
             _btnTop.SetBounds(946, 8, 88, 28); _btnTop.Text = "窗口前置"; _btnTop.BackColor = Color.LightSkyBlue;
             _lblStatus.SetBounds(1040, 12, 68, 22); _lblStatus.Text = ""; _lblStatus.Visible = false;
             _btnStop.SetBounds(1114, 8, 92, 28); _btnStop.Text = "停止"; _btnStop.BackColor = Color.MistyRose; _btnStop.Enabled = false;
@@ -169,7 +158,7 @@ namespace caxa3dBatchMaster
 
             Controls.AddRange(new Control[] {
                 _btnImportAssembly, _btnRename, _btnReadProps, _btnWriteProps,
-                _btnClear, _btnRefreshDrw, _btnSplit, _btnPackage, _btnWarmup, _pnlWarmup, _btnTop, _btnStop, _btnLog,
+                _btnClear, _btnRefreshDrw, _btnSplit, _btnPackage, _btnTop, _btnStop, _btnLog,
                 _txtTablePath, _btnRefreshTable, _btnSelectTable, _btnLocateTable, _lblInfo,
                 _chkDeclineUpdate3d,
                 _dgv });
@@ -193,7 +182,6 @@ namespace caxa3dBatchMaster
             _btnRefreshDrw.Click += BtnRefreshDrw_Click;
             _btnSplit.Click += BtnSplit_Click;
             _btnPackage.Click += BtnPackage_Click;
-            _btnWarmup.Click += BtnWarmup_Click;
             _btnTop.Click += BtnTop_Click;
             _btnRefreshTable.Click += BtnRefreshTable_Click;
             _btnSelectTable.Click += BtnSelectTable_Click;
@@ -215,49 +203,9 @@ namespace caxa3dBatchMaster
             try { AppendLog(SplitRules.InitAndDescribe()); }
             catch (Exception ex) { AppendLog("图号分离规则加载失败：" + ex.Message); }
             LoadDefaultTable();
-            UpdateWarmUpVisual();   // 11-10 追加：反映图纸环境初始状态（红=未预热）
-            StartAutoWarmup();
-        }
-
-        /// <summary>
-        /// 自动预热（用户 2026-11-12 指令：带图纸环境预热的子插件，开启后要自动预热图纸环境）。
-        /// 与 caxa3dButton 子插件同款：OnShown 后 1 秒触发；只在冷态（CRX 探针不在）才真预热，
-        /// 热态直接跳过（与 BatchProcessor 刷新工程图前的桥就绪判据同一把尺子 ViewBridge.IsCrxLoaded()）。
-        /// 失败只写日志，不中止任何流程——各业务链内部的「桥就绪（含预热）」兜底原样保留。
-        /// </summary>
-        private void StartAutoWarmup()
-        {
-            if (_autoWarmFired) return;
-            _autoWarmFired = true;
-            if (_running) { Diagnostics.Trace("warm-auto: 已有流程在跑，本轮自动预热让位"); return; }
-            var autoTimer = new System.Windows.Forms.Timer { Interval = 1000 };
-            autoTimer.Tick += delegate
-            {
-                autoTimer.Stop();
-                autoTimer.Dispose();
-                try
-                {
-                    if (_running) { Diagnostics.Trace("warm-auto: 定时到但已有流程在跑，自动预热让位"); return; }
-                    if (ViewBridge.IsCrxLoaded())
-                    {
-                        Diagnostics.Trace("warm-auto: " + ViewBridge.MarkerState() + " ⇒ 已是热态，跳过预热");
-                        return;
-                    }
-                    AppendLog("自动预热：正在焐热图纸环境（OpenFile2 专用空图纸，约需数秒）…");
-                    Diagnostics.Trace("warm-auto: 工具窗已显示，开始自动预热图纸环境");
-                    bool ok = ViewBridge.WarmUpDrawingEnv(_svc.App, 30000,
-                        m => { Diagnostics.Trace("warm-auto: " + m); });
-                    _warmupDone = ok;                       // 与手动预热同一盏状态灯（11-10 追加）
-                    UpdateWarmUpVisual();
-                    AppendLog(ok ? "自动预热完成：图纸环境已就绪（预热图纸已不保存关掉）"
-                                 : "自动预热未成（原因见 %TEMP% 日志），跑「刷新工程图/图号分离」时各流程会再按需预热");
-                }
-                catch (Exception ex)
-                {
-                    Diagnostics.Trace("warm-auto: 自动预热失败：" + ex.Message);
-                }
-            };
-            autoTimer.Start();
+            // 自动预热已上收到集合体主界面（Host 统一预热铁律，AGENTS.md）：
+            // 本子插件不再自动预热、不带预热按钮/状态灯；各业务链内部「桥就绪（含预热）」
+            // 兜底（ViewBridge.WarmUpDrawingEnv）保留 —— 那是防崩安全机制，不是预热入口。
         }
 
         // ---------------------------------------------------------------- 状态 / 日志
@@ -647,36 +595,6 @@ namespace caxa3dBatchMaster
             {
                 dlg.ShowDialog(this);
             }
-        }
-
-        /// <summary>「图纸环境预热」（11-10 追加，参考 caxa3dButton）：OpenFile2 打开专用空图纸把 CRX 桥带起来，
-        /// 等 marker 新鲜后 CLOSERAW 不保存关掉载体，使 2D 转换（dwg/dxf/pdf）可用。走 RunLong（停止键可用）。</summary>
-        private void BtnWarmup_Click(object sender, EventArgs e)
-        {
-            if (!_svc.IsConnected) { AppendLog("请先在 CAXA 3D 打开一个文档，再预热图纸环境。"); return; }
-            UpdateWarmUpVisual();
-            RunLong(() =>
-            {
-                try
-                {
-                    AppendLog("开始图纸环境预热…");
-                    bool ok = ViewBridge.WarmUpDrawingEnv(_app, 30000, AppendLog);
-                    _warmupDone = ok;
-                    AppendLog(ok ? "图纸环境预热完成：CRX 已就绪，载体已不保存关闭。"
-                                : "图纸环境预热失败，详见日志与 CRX 日志（" + ViewBridge.LogPath + "）。");
-                }
-                catch (OperationStoppedException) { AppendLog("图纸环境预热被用户停止。"); }
-                catch (Exception ex) { AppendLog("图纸环境预热异常：" + ex.Message); }
-            });
-            UpdateWarmUpVisual();
-        }
-
-        /// <summary>三态状态灯：红=未预热 / 黄绿=已预热·载体已关 / 绿=已就绪（CRX marker 新鲜且非本次预热）。</summary>
-        private void UpdateWarmUpVisual()
-        {
-            bool loaded = CrxBridge.IsCrxLoaded();
-            if (!loaded) { _pnlWarmup.BackColor = Color.Red; _warmupDone = false; return; }
-            _pnlWarmup.BackColor = _warmupDone ? Color.Chartreuse : Color.Lime;
         }
 
         private void BtnTop_Click(object sender, EventArgs e)

@@ -61,6 +61,8 @@ namespace caxa3dsheetmaster
         public int AllowanceType = -1;
         public bool CustomKUsed;
         public double CustomK;
+        /// <summary>自定义 K 是否回读成功（false 时「折弯系数数值」显示「—」，不把读不到折成 0）。</summary>
+        public bool CustomKRead = true;
         /// <summary>折弯扣除（mm）。</summary>
         public double DeductionMm;
         /// <summary>零件级（从零件继承）的折弯扣除（mm）；该零件没有折弯扣除行时为 NaN。</summary>
@@ -129,7 +131,9 @@ namespace caxa3dsheetmaster
                 switch (AllowanceType)
                 {
                     case 0: return "";
-                    case 1: return (CustomKUsed ? CustomK : PartKFactor).ToString("0.0000");
+                    case 1:
+                        if (!CustomKUsed) return PartKFactor.ToString("0.0000");
+                        return CustomKRead ? CustomK.ToString("0.0000") : "—";
                     case 2: return DeductionMm.ToString("0.000");
                     default: return "";
                 }
@@ -276,7 +280,8 @@ namespace caxa3dsheetmaster
         // 探针专用只读属性（不参与业务流程）
         private const int SlotSmGetThickness2 = 15;
         private const int SlotSmGetMinBendRadius = 19;        // 零件最小折弯半径（米）
-        private const int SlotSmGetUseDin6935 = 21;
+        private const int SlotSmGetUseDIN6935 = 21;           // IZSheetMetalPart::get_UseDIN6935
+        private const int SlotSmSetUseDIN6935 = 22;           // IZSheetMetalPart::set_UseDIN6935
         private const int SlotSmGetThicknessRefSide = 23;
         private const int SlotSmGetCustomUnfoldLength = 27;
         private const int SlotBendGetFirstBendLength = 7;
@@ -820,6 +825,13 @@ namespace caxa3dsheetmaster
 
             Diagnostics.Log(string.Format("板厚={0:0.###}mm K={1:0.####}（板料={2}）",
                 thicknessMm, kFactor, stockName));
+
+            // DIN6935 模式：开启时 K 由 CAXA 按 R/T 计算，自定义 K 写入会被重算覆盖
+            short din;
+            if (TryReadShortProp(pSm, SlotSmGetUseDIN6935,
+                    "SM.get_UseDIN6935(" + partName + ")", out din))
+                Diagnostics.Log(string.Format("零件[{0}] UseDIN6935={1}（开启时折弯 K 由 R/T 计算）",
+                    partName, din != 0 ? "是" : "否"));
         }
 
         /// <summary>
@@ -1568,9 +1580,9 @@ namespace caxa3dsheetmaster
                 row.CustomKUsed = ck != 0;
 
             double v;
-            if (TryReadDoubleProp(pBend, SlotBendGetCustomKValue,
-                    "Bend.get_CustomKFactorValue(" + tag + ")", out v))
-                row.CustomK = v;
+            row.CustomKRead = TryReadDoubleProp(pBend, SlotBendGetCustomKValue,
+                "Bend.get_CustomKFactorValue(" + tag + ")", out v);
+            if (row.CustomKRead) row.CustomK = v;
 
             if (TryReadDoubleProp(pBend, SlotBendGetDeductionValue,
                     "Bend.get_BendDeductionValue(" + tag + ")", out v))
@@ -1900,6 +1912,8 @@ namespace caxa3dsheetmaster
                             Result.PartTotal++;
                             if (pc.SmValid)
                             {
+                                // DIN6935 开启时 K 由 R/T 自动算，先关掉再写 K
+                                EnsureDin6935Off(pc.pSm, pc.Name);
                                 int hr = TrySetDouble(pc.pSm, SlotSmSetKFactor, Value,
                                     "SM.set_KFactor(" + pc.Name + ")");
                                 double back = double.NaN;
@@ -1944,6 +1958,8 @@ namespace caxa3dsheetmaster
                 string stockName;
                 double kk, thicknessMm;
                 ReadStockThicknessK(pSm, partName, out thicknessMm, out kk, out stockName);
+                // 写折弯 K 前先关 DIN6935，否则自定义 K 会被 CAXA 按 R/T 重算覆盖
+                if (KMode) EnsureDin6935Off(pSm, partName);
                 int total = ForEachBendFeatureByFeatureMgr(pSm, partName, (lineId, pBend, elemId, elemType, elemName) =>
                 {
                     Result.BendTotal++;
@@ -2005,8 +2021,9 @@ namespace caxa3dsheetmaster
         /// 对单个折弯写入并回读校验。成功返回 null，失败返回原因（规则 7：只认回读值）。
         /// 实测（2026-10-29 19:39 日志）：特征对象上的 set_* 全部返回 hr=0，但值要等零件 Update 才提交，
         /// 未提交时 get_* 读回仍是旧值 ⇒ 每次写入后必须先 IZPart.Update(slot 7) 再校验。
-        /// K 模式：get_CustomKFactorValue 在特征对象上返回 E_FAIL，K 值无法回读，
-        /// 改用「set hr=0 + type==1」判定，并在日志里明确标注 K 值未回读。
+        /// K 模式（2026-11-12 实机日志）：CustomKFactorUsed=-1 时 get_CustomKFactorValue 可回读；
+        /// 若零件启用 DIN6935，K 由 R/T 自动计算（改内半径后 0.325→0.3637），
+        /// 因此写 K 前由调用方先 EnsureDin6935Off，并保留「换写入顺序重试」。
         /// 折弯扣除有物理上限：D ≤ 2×(R+T) − θ×R，超出时系统会拒绝写入，先拦截。
         /// </summary>
         private static string WriteOne(IntPtr pBend, string bendName, int mode,
@@ -2014,6 +2031,7 @@ namespace caxa3dsheetmaster
         {
             if (mode == WriteCustomK)
             {
+                // 第一次：type → value → used（历史顺序）
                 int hr1 = TrySetInt(pBend, SlotBendSetAllowanceType, BendTypeKFactor,
                     "Bend.set_BendAllowanceType(" + bendName + ")");
                 int hr2 = TrySetDouble(pBend, SlotBendSetCustomKValue, valueMmOrK,
@@ -2022,7 +2040,7 @@ namespace caxa3dsheetmaster
                     "Bend.set_CustomKFactorUsed(" + bendName + ")");
                 PartUpdate(pSm, bendName);
 
-                int type2 = -1; short used; double kBack = double.NaN;
+                int type2 = -1; short used = -1; double kBack = double.NaN;
                 bool hasType = TryReadIntProp(pBend, SlotBendGetAllowanceType,
                     "Bend.get_BendAllowanceType(verify)", out type2);
                 TryReadShortProp(pBend, SlotBendGetCustomKUsed,
@@ -2031,18 +2049,38 @@ namespace caxa3dsheetmaster
                     "Bend.get_CustomKFactorValue(verify)", out kBack);
 
                 if (hr1 == 0 && hr2 == 0 && hasType && type2 == BendTypeKFactor
-                    && (!hasK || Math.Abs(kBack - valueMmOrK) < 1e-9))
-                {
-                    if (!hasK)
-                        Diagnostics.Log(string.Format(
-                            "折弯[{0}] K 值不可回读，按 set hr=0 + type=1 判定已生效（值 {1:0.####}）",
-                            bendName, valueMmOrK));
+                    && hasK && Math.Abs(kBack - valueMmOrK) < 1e-6)
                     return null;
-                }
+
+                // 第二次：used(-1) → value → type
+                // 切「折弯系数类型」时 CAXA 可能把自定义 K 重置成表值，先置自定义再写值可避开
+                Diagnostics.Log(string.Format(
+                    "折弯[{0}] 首次 K 写入未生效（回读 type={1} used={2} k={3}），改试「先置自定义K再写值再写类型」",
+                    bendName, type2, used, hasK ? kBack.ToString("0.000000") : "不可读"));
+                int hr3 = TrySetShort(pBend, SlotBendSetCustomKUsed, -1,
+                    "Bend.set_CustomKFactorUsed(" + bendName + ", retry)");
+                int hr4 = TrySetDouble(pBend, SlotBendSetCustomKValue, valueMmOrK,
+                    "Bend.set_CustomKFactorValue(" + bendName + ", retry)");
+                int hr5 = TrySetInt(pBend, SlotBendSetAllowanceType, BendTypeKFactor,
+                    "Bend.set_BendAllowanceType(" + bendName + ", retry)");
+                PartUpdate(pSm, bendName);
+
+                hasType = TryReadIntProp(pBend, SlotBendGetAllowanceType,
+                    "Bend.get_BendAllowanceType(verify2)", out type2);
+                TryReadShortProp(pBend, SlotBendGetCustomKUsed,
+                    "Bend.get_CustomKFactorUsed(verify2)", out used);
+                hasK = TryReadDoubleProp(pBend, SlotBendGetCustomKValue,
+                    "Bend.get_CustomKFactorValue(verify2)", out kBack);
+                if (hr3 == 0 && hr4 == 0 && hr5 == 0 && hasType && type2 == BendTypeKFactor
+                    && hasK && Math.Abs(kBack - valueMmOrK) < 1e-6)
+                    return null;
+
                 return string.Format(
-                    "折弯「{0}」K因子写入未生效（hr=0x{1:X}/0x{2:X}，回读 type={3} used={4} k={5}）",
-                    bendName, hr1, hr2, type2, used,
-                    hasK ? kBack.ToString("0.####") : "不可读");
+                    "折弯「{0}」K因子写入未生效（回读 type={1} used={2} k={3}，{4}）。"
+                    + "若零件仍启用 DIN6935 / K 因子表，K 会由 R/T 自动计算。",
+                    bendName, type2, used,
+                    hasK ? kBack.ToString("0.000000") : "不可读",
+                    hasK ? string.Format("期望 {0:0.000000}", valueMmOrK) : "K 值回读不可用");
             }
 
             double api = valueMmOrK / 1000.0;
@@ -2163,6 +2201,33 @@ namespace caxa3dsheetmaster
                 ActivateDefaultConfiguration(_sceneForRestore, null);
         }
 
+        /// <summary>
+        /// DIN6935 开启时 CAXA 按 R/T 自动计算折弯 K，自定义 K 写入会被重算覆盖；
+        /// 写 K 之前自动关闭该模式（用户 2026-11-12 确认：统一写 K 因子时自动关闭 DIN6935）。
+        /// 返回 true = 已关闭（或本来就未开启）；读不到该属性时按未开启处理，不阻塞写入。
+        /// </summary>
+        private static bool EnsureDin6935Off(IntPtr pSm, string partName)
+        {
+            if (pSm == IntPtr.Zero) return true;
+            short din;
+            if (!TryReadShortProp(pSm, SlotSmGetUseDIN6935,
+                    "SM.get_UseDIN6935(" + partName + ")", out din))
+                return true;
+            if (din == 0) return true;
+
+            int hr = TrySetShort(pSm, SlotSmSetUseDIN6935, 0,
+                "SM.set_UseDIN6935(" + partName + ", false)");
+            PartUpdate(pSm, partName);
+
+            short back;
+            bool off = TryReadShortProp(pSm, SlotSmGetUseDIN6935,
+                "SM.get_UseDIN6935(verify " + partName + ")", out back) && back == 0;
+            Diagnostics.Log(string.Format(
+                "零件[{0}] DIN6935=是 → 自动关闭（hr=0x{1:X}，回读={2}）",
+                partName, hr, off ? "否" : "仍是 是"));
+            return off;
+        }
+
         /// <summary>写入期间记录活动场景指针，供 PartUpdate 之后立即恢复默认配置。</summary>
         private static IntPtr _sceneForRestore;
 
@@ -2239,6 +2304,9 @@ namespace caxa3dsheetmaster
                         if (TryQI(pElem, IID_IZSheetMetalPart, out pSm) != 0 || pSm == IntPtr.Zero) return;
                         try
                         {
+                            // 写 K 相关属性前先关 DIN6935（K 由 R/T 自动算会覆盖写入值）
+                            if (kFactorMode || specialMode == 1 || specialMode == 2)
+                                EnsureDin6935Off(pSm, pname);
                             ForEachBendFeatureByFeatureMgr(pSm, pname, (lineId, pBend, featIdx, elemType, elemName) =>
                             {
                                 if (found || featIdx != target.BendId) return;

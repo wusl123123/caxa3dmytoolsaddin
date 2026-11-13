@@ -52,9 +52,7 @@ namespace caxa3dcodenameextraction
         private Button _btnSheetMetal;
         private Button _btnTitleBlock;
         private Button _btnSheetSize;
-        private Button _btnWarmUp;
         private bool _warmCarrierOpen;       // 预热图纸还开着 = 热状态载体（图纸环境跟着它活，开完目标 exb 再关）
-        private bool _autoWarmFired;         // 自动预热只发一次：窗口反复开合不重复跑（用户 2026-11-12 指令：开启子插件后自动预热）
         private string _warmChannel = "";    // 载体的来历（只进日志）
         /// <summary>本会话成功预热过（图纸随后已按用户要求立即关掉）。
         /// 用途只有界面状态灯：探针 marker 在 CRX 卸载时被删，所以"图纸关了"和"没预热过"
@@ -253,9 +251,6 @@ namespace caxa3dcodenameextraction
             _btnRegen = MakeButton("零部件重新生成", Col0 + 3 * (BtnW + GapX), Row2, BtnW);
             _btnStop.Enabled = false;
 
-            // 「图纸环境预热」：放在「窗口前置」正下方（panelBody 顶行、同一左边界），
-            // 底色就是状态灯 —— 绿=本会话已进过图纸环境（CRX 探针在），红=还没进（开图纸有崩的风险）。
-            _btnWarmUp = MakeButton("图纸环境预热", 10, 6, 150);
             // 「更新3dbom」（迁自 caxa3dexbtracker）：设计环境里选中装配体 → 打开同名 exb →
             // 派 CX_DFT_Update3DBom → 「更新3D明细」框自动勾「更新」点确定。
             // 单按钮口径：图纸**打开后不关**（明细要在图上看）；只有在「重命名v2.0」联动链里才保存并关闭。
@@ -284,7 +279,7 @@ namespace caxa3dcodenameextraction
                 _lblConnection, _lblOldName, _txtOldName, _lblOldFlag,
                 _lblNewName, _txtNewName, _lblNewFlag, lblRule, _cboRule,
                 _btnSep, _btnDiff, _btnRename, _btnManualSep, _btnReplaceProbe,
-                _btnChangeLinks, _btnWarmUp, _btnRegen,
+                _btnChangeLinks, _btnRegen,
                 _btnSheetMetal, _btnTitleBlock, _btnSheetSize,
                 _btnUpdate3DBom, _btnStop, _lblStatus, _chkDeclineUpdate3d });
 
@@ -321,7 +316,6 @@ namespace caxa3dcodenameextraction
             _btnDiff.Click += BtnDiff_Click;
             _btnReplaceProbe.Click += BtnReplaceProbe_Click;
             _btnChangeLinks.Click += BtnUpdateDrawingLinks_Click;
-            _btnWarmUp.Click += BtnWarmUp_Click;
             _btnRegen.Click += BtnRegen_Click;
             _btnManualSep.Click += BtnManualSep_Click;
             _btnSheetMetal.Click += BtnSheetMetal_Click;
@@ -336,7 +330,6 @@ namespace caxa3dcodenameextraction
                 // 让位看门狗必须在 Busy 分支之前跑：流程期正是窗口沉底的时候，
                 // 放在 return 之后等于永远不检查（超期就把工具窗永久留在 Z 序底）。
                 RestoreIfOverdue();
-                UpdateWarmUpVisual();
                 if (!Visible || FlowGate.Busy) return;
                 // 800 ms 一次的界面刷新只是为了让「选中件」跟手，不是流程步骤：
                 // 不压住细粒度 COM 日志的话，一行流程图要配几百行 hr=0x0
@@ -347,40 +340,12 @@ namespace caxa3dcodenameextraction
                 finally { Diagnostics.PollQuiet = false; }
             };
             _timer.Start();
-            UpdateWarmUpVisual();
         }
 
         private static Button MakeButton(string text, int x, int y, int w)
         {
             return new Button { Text = text, Location = new Point(x, y), Size = new Size(w, 28) };
         }
-
-        /// <summary>
-        /// 「图纸环境预热」按钮当状态灯用，三态：
-        ///   绿 = CRX 探针在，开 exb 走热路径；
-        ///   黄绿 = 本会话预热过，但预热图纸已按要求立即关掉（marker 随卸载删除，探针不在）；
-        ///   红 = 本会话根本没进过图纸环境（冷态直接开图纸有崩 dataexchange.dll 的先例）。
-        /// 判据只有探针这一个观测点，不猜 —— 手工开一次图纸后探针照样变绿。
-        /// </summary>
-        private void UpdateWarmUpVisual()
-        {
-            bool warm;
-            try { warm = CrxBridge.IsCrxLoaded(); }
-            catch { warm = false; }
-            int state = warm ? 1 : (_warmedOnce ? 2 : 0);
-            if (state == _warmShown) return;
-            _warmShown = state;
-            _btnWarmUp.BackColor = state == 1 ? Color.FromArgb(46, 160, 67)
-                                 : state == 2 ? Color.FromArgb(122, 140, 60)
-                                              : Color.FromArgb(216, 66, 66);
-            _btnWarmUp.ForeColor = Color.White;
-            _btnWarmUp.FlatStyle = FlatStyle.Flat;
-            _btnWarmUp.FlatAppearance.BorderSize = 0;
-            _btnWarmUp.Text = state == 1 ? "图纸环境：已预热"
-                            : state == 2 ? "图纸环境：已预热(图纸已关)"
-                                         : "图纸环境：未预热";
-        }
-        private int _warmShown = -1;   // -1 = 还没染过色，第一次刷新必染
 
         /// <summary>窗口前置开关：点一次锁定在 CAXA 之上（方便边选零部件边看本窗口），再点一次解锁。</summary>
         private void ToggleTopMost()
@@ -473,38 +438,9 @@ namespace caxa3dcodenameextraction
         protected override void WndProc(ref Message m) { if (Caxa3dMyTools.Contracts.ChordRescue.Route(this, ref m)) return; base.WndProc(ref m); }
         // ↑↑↑
 
-        /// <summary>
-        /// 自动预热（用户 2026-11-12 指令：带图纸环境预热的子插件，开启后要自动预热图纸环境）。
-        /// 与 caxa3dButton 子插件同款：OnShown 后 1 秒主线程跑 WarmUpDrawingEnv(true)，
-        /// 热态时方法内部自己判「已是热态，不用重复预热」，失败只写日志不动流程；
-        /// 有流程在跑（FlowGate.Busy）时让位，由流程内的 EnsureDrawingOpened 按需预热。
-        /// </summary>
-        protected override void OnShown(EventArgs e)
-        {
-            base.OnShown(e);
-            if (_autoWarmFired) return;
-            _autoWarmFired = true;
-            if (FlowGate.Busy) { Diagnostics.Log("warm-auto: 已有流程在跑，本轮自动预热让位"); return; }
-            Diagnostics.Log("warm-auto: 工具窗已显示，1 秒后自动触发图纸环境预热 …");
-            var autoTimer = new System.Windows.Forms.Timer { Interval = 1000 };
-            autoTimer.Tick += delegate
-            {
-                autoTimer.Stop();
-                autoTimer.Dispose();
-                try
-                {
-                    if (FlowGate.Busy) { Diagnostics.Log("warm-auto: 定时到但已有流程在跑，自动预热让位"); return; }
-                    bool warm = WarmUpDrawingEnv(true);
-                    Diagnostics.Log("warm-auto: 自动预热" + (warm ? "完成（预热图纸已不保存关掉）" : "未成，原因见日志；需要时点「图纸环境预热」手动补一次"));
-                }
-                catch (Exception ex)
-                {
-                    Diagnostics.Log("warm-auto: 自动预热失败：" + ex.Message);
-                }
-            };
-            autoTimer.Start();
-        }
-
+        // 自动预热已上收到集合体主界面（Host 统一预热铁律，AGENTS.md）：
+        // 本子插件不再在 OnShown 里自动预热；业务流程内的按需预热兜底
+        // （EnsureDrawingOpened / WarmUpDrawingEnv）保留 —— 那是防崩安全机制，不是预热入口。
 
         private void CopyNewName()
         {
@@ -695,7 +631,6 @@ namespace caxa3dcodenameextraction
             _btnChangeLinks.Enabled = has && !FlowGate.Busy;
             _btnSheetMetal.Enabled = !FlowGate.Busy;
             _btnTitleBlock.Enabled = !FlowGate.Busy;
-            _btnWarmUp.Enabled = !FlowGate.Busy;
             // 重新生成对虚拟件也有意义（它提交的是文档里的元素），所以不卡 ExternallyLinked
             _btnRegen.Enabled = has && !FlowGate.Busy;
         }
@@ -1519,12 +1454,10 @@ namespace caxa3dcodenameextraction
             {
                 Warm("预热失败：没找到「caxa3d图纸环境预热.exb」（找过插件目录并逐级向上、以及开发机项目目录）—— " +
                      "请把该文件放到插件目录，或在 CAXA 里手工开一次图纸焐热环境");
-                UpdateWarmUpVisual();
                 return false;
             }
             Warm("预热入口：直接打开项目预热图纸「" + Path.GetFileName(warmExb) + "」（" + warmExb + "）");
             bool ok = WarmByOpenWarmupExb(warmExb, closeRightAway);
-            UpdateWarmUpVisual();
             return ok;
         }
 
@@ -1678,7 +1611,6 @@ namespace caxa3dcodenameextraction
             {
                 _warmChannel = "";
                 _warmCarrierOpen = false;
-                UpdateWarmUpVisual();
             }
         }
 
@@ -2474,7 +2406,6 @@ namespace caxa3dcodenameextraction
             _btnSheetMetal.Enabled = false;
             _btnTitleBlock.Enabled = false;
             _btnSheetSize.Enabled = false;
-            _btnWarmUp.Enabled = false;
             _btnRegen.Enabled = false;
             _btnUpdate3DBom.Enabled = false;
             _btnStop.Enabled = true;
@@ -2738,36 +2669,6 @@ namespace caxa3dcodenameextraction
             }
 
             RunLongFlow("工程图标题栏设默认", delegate { UpdateTitleBlock(exb); });
-        }
-
-        /// <summary>
-        /// 「图纸环境预热」：单独把"先焐热图纸环境"这一步做成按钮，并监控预热状态。
-        ///
-        /// 为什么要单独一个按钮（11-02 实机）：崩的那次（12:57:19，dump IRONCAD.exe.15156.dmp）
-        /// 故障点是 dataexchange!DllGetActivationFactory+0x87 / c0000005，发生在 CX_open_Impl
-        /// 已经 commandEnded（24 实体、4 个 CRxDbView3D 都建好了）之后约 2 秒；而只要图纸环境
-        /// 先被进去过一次，同一张钣金 exb 连开 4 次（13:35:16/20/40/52，同样 24 实体 4 视图）
-        /// 全部平安。把焐热拆出来手动做，比塞在流程里更容易验证、也更容易复位。
-        /// </summary>
-        private void BtnWarmUp_Click(object sender, EventArgs e)
-        {
-            if (FlowGate.Busy) return;
-            if (_siteApp == null)
-            {
-                MessageBox.Show("尚未连接 CAXA 3D。", AppTitleBase);
-                return;
-            }
-
-            RunLongFlow("图纸环境预热", delegate
-            {
-                _lblStatus.Text = "正在预热图纸环境...";
-                // 手动预热：焐热后立刻不保存关掉，界面上不留道具窗口（用户 08:09 指定，不判闲置）
-                bool warm = WarmUpDrawingEnv(true);
-                // 不弹模态框：按钮本身就是状态灯，弹一次框等于把 CAXA 主界面锁 8 秒
-                _lblStatus.Text = warm ? "图纸环境已预热，预热图纸已不保存关掉（跑流程时会按需再预热一次）"
-                                       : "预热没成：日志里有失败原因，请手工开一次图纸";
-                _lblStatus.ForeColor = warm ? Color.FromArgb(16, 124, 16) : Color.FromArgb(209, 52, 56);
-            });
         }
 
         /// <summary>

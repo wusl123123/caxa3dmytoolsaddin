@@ -30,4 +30,13 @@
     </PackageReference>
   </ItemGroup>
 
+  <!-- DrawingWarmup 需要 IZBaseApp.OpenFile2（预热引擎唯一公共实现）；NoPIA 类型等同，
+       各插件/Host 各自嵌入的同 GUID 接口与本程序集的嵌入类型互通 -->
+  <ItemGroup>
+    <Reference Include="interop.ICApiIronCAD">
+      <HintPath>..\..\Lib\interop.ICApiIronCAD.dll</HintPath>
+      <EmbedInteropTypes>True</EmbedInteropTypes>
+    </Reference>
+  </ItemGroup>
+
 </Project>

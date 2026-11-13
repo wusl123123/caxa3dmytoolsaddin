@@ -4,12 +4,16 @@
 .DESCRIPTION
     设计约束（踩坑后固化）：
       * 本脚本必须保存为“单个 UTF-8 BOM”；否则 PS5.1 按 GBK 解码会静默崩溃。
+      * ★ 2026-11-13 预热铁律：caxa3d图纸环境预热.exb 由 deploy.ps1 拷到 CAXA bin 根，
+        卸载时必须一并清掉（bin 根那份是本集合体的部署产物），并在残留校验里点名。
+      * ★ 共享清单 CxAutorun.cx 只按行摘自己的登记，删前删后都做 [xml] 结构校验，
+        节点数变化不吻合或写盘后回读不通过一律回滚（坑 167/168），绝不整体重写共享文件。
       * 绝不回滚 *.bak：备份可能已污染，还原会留下指向已删 DLL 的 manifest 依赖，
         SxS 解析失败将导致 CAXA 无法启动。这里只做“手术式删除 + 正则无条件兜底”。
       * 所有删除都带 try/catch：CAXA 进程锁住 DLL 时只警告，继续往下清理。
       * 提权时把脚本副本落到 C:\ProgramData（真实文件系统），避免沙箱文件不可见。
       * ★ 2026-11-07 卸载口径 = 「安装过的东西全部清掉」：
-          ① bin 根：主程序 / 契约 / pdb / 9 个迁入插件的旧 DLL+pdb / 散放的 EXE 与独立版遗留资源；
+          ① bin 根：主程序 / 契约 / pdb / 10 个迁入插件的旧 DLL+pdb / 散放 EXE / 预热载体 .exb；
           ② bin 下 caxa3dmytoolsaddin\plugins 整棵目录（11 个子插件 + 各自的 .crx/.txt/.xlsx/.exb/.exe）；
           ③ CAXADraft\bin 的 5 个 .crx + CxAutorun.cx 里对应的登记行（先摘登记再删文件）；
           ④ IronCad.Addin.config / IronCad.exe.manifest 的条目；
@@ -22,7 +26,13 @@ param(
     [string]$WorkRoot = ''
 )
 
-$ScriptVersion = '2026-11-07.1'
+# ★ 铁律 11：每轮脚本执行都重置两个输出日志（提权重启会再跑一次，无副作用）。
+foreach ($suffix in @('_trace.log', '_crx.log')) {
+    $logPath = Join-Path $env:TEMP ('caxa3dmytoolsaddin' + $suffix)
+    if (Test-Path $logPath) { Remove-Item $logPath -Force -ErrorAction SilentlyContinue }
+}
+
+$ScriptVersion = '2026-11-13.1'
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = if ($WorkRoot) { $WorkRoot } else { $PSScriptRoot }
@@ -51,6 +61,8 @@ Write-Host ""
 $hostName      = 'caxa3dmytoolsaddin'
 $clsid         = '{6F1A9C24-3B57-4E8D-9A02-5C7D1E8B4F36}'
 $contractsName = 'Caxa3dMyTools.Contracts.dll'
+# 预热载体：deploy.ps1 把它拷到 CAXA bin 根，卸载按本清单清掉
+$warmExbName   = 'caxa3d图纸环境预热.exb'
 
 # 「2. 独立插件」列的后台进程清理工具（启动器 DLL + 进程外 EXE）
 $idcPluginName = 'caxa3didcskill'
@@ -330,23 +342,68 @@ function Get-CaxaVersionDirs {
 }
 
 # 已并入集合体的旧插件：卸载时一并清理其独立登记（集合体不再承载的功能不列入，避免误删兄弟 Add-in）。
-# ★ 这三张表必须与 deploy.ps1 的同名三张表**完全一致**（2026-11-07 对齐为 9 项）：
-#   之前这里只列了 3 项，卸载后 bin 根会留下另外 5 个已迁入插件的旧 DLL —— 复核口径「已全部卸载」不成立。
-$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll')
-$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster')
-$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}')
+# ★ 这三张表必须与 deploy.ps1 的同名三张表**完全一致**（2026-11-13 对齐为 10 项）：
+#   之前这里只列了 3 项，卸载后 bin 根会留下另外 5 个已迁入插件的旧 DLL；
+#   2026-11-09 deploy 补入 caxa3dButton 后这里又漏了一项，本轮补齐 —— 漏一项就是「已全部卸载」假结论。
+$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll')
+$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton')
+$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}')
 
 # 部署时投放到 CAXADraft\bin 的图纸环境 CRX 桥（第 5 登记点）。
-# caxa3dapicapture.crx 不在 deploy 的 crxItems 里（它由 caxa3dapigetaddin 的「注册CRX模块」手工登记），
-# 这里一并清理历史残留；清单与残留校验共用这一个变量，避免两处各写一份而漏项。
+# 与 deploy.ps1 的 $crxItems + $removedCrxs 对齐：caxa3dapigetaddin.crx 是 deploy 会主动清理的
+# 已下线桥，之前这里漏登记；caxa3dapicapture.crx 由 caxa3dapigetaddin 的「注册CRX模块」手工登记，
+# 一并清理历史残留。清单与残留校验共用这一个变量，避免两处各写一份而漏项。
 $crxNames = @('caxa3dcodenameextraction.crx', 'caxa3dCXDFTViewUpdate.crx',
-              'caxa3dminitool.crx', 'caxa3dBatchMasterView.crx', 'caxa3dapicapture.crx')
+              'caxa3dminitool.crx', 'caxa3dBatchMasterView.crx', 'caxa3dapicapture.crx',
+              'caxa3dapigetaddin.crx')
 
-# 独立版 Add-in 部署时散落在 bin 根的资源（迁入集合体后这些是孤儿文件，一并清掉）
-$looseResidue = @('caxa3d图纸环境预热.exb', 'caxa3dBatchMaster属性表格.xlsx',
+# bin 根散放资源：独立版 Add-in 留下的孤儿文件 + ★ Host 部署的预热载体 .exb
+# （2026-11-13 起该 exb 由 deploy.ps1 拷到 bin 根，是本集合体的安装产物，卸载必须清掉）。
+$looseResidue = @($warmExbName, 'caxa3dBatchMaster属性表格.xlsx',
                   'caxa3dBatchMaster内部字段映射.txt', 'caxa3dBatchMaster图号分离规则.txt')
 
 # ================================================================ 通用工具
+
+# ---------- 共享清单 Modules\CxAutorun.cx 手术式删行（坑 167/168 三道防线） ----------
+# 只摘自己那一行：写前 [xml] 校验 → 写盘（保原 BOM）→ 写后回读再校验；
+# 「删掉的 File 节点数 == 命中行数」防止误删兄弟插件条目，任一步失败整体回滚原字节。
+function Test-CxWellFormed([string]$text) {
+    try {
+        [xml]$doc = $text.TrimStart([char]0xFEFF)
+        return ($doc.DocumentElement.LocalName -eq 'Modules')
+    } catch { return $false }
+}
+
+function Get-CxFileNodeCount([string]$text) {
+    [xml]$doc = $text.TrimStart([char]0xFEFF)
+    return @($doc.SelectNodes("//*[local-name()='File']")).Count
+}
+
+function Remove-CxAutorunLine([string]$cxPath, [string]$crxName) {
+    if (-not (Test-Path $cxPath)) { return 'SKIP' }
+    $origBytes = [IO.File]::ReadAllBytes($cxPath)
+    $hadBom = ($origBytes.Length -ge 3 -and $origBytes[0] -eq 0xEF -and $origBytes[1] -eq 0xBB -and $origBytes[2] -eq 0xBF)
+    try {
+        $cx = [IO.File]::ReadAllText($cxPath).TrimStart([char]0xFEFF)
+        if (-not ($cx -like "*$crxName*")) { return 'SKIP' }
+        if (-not (Test-CxWellFormed $cx)) { return 'FAIL:原 CxAutorun.cx 不是合法 XML（未改动）' }
+        $before = Get-CxFileNodeCount $cx
+        $rx = '(?im)^[^\r\n]*' + [regex]::Escape($crxName) + '[^\r\n]*(?:\r?\n|$)'
+        $hits = @([regex]::Matches($cx, $rx)).Count
+        $newCx = [regex]::Replace($cx, $rx, '')
+        if (-not (Test-CxWellFormed $newCx)) { return 'FAIL:删行后 XML 校验不通过（未写盘）' }
+        if (($before - (Get-CxFileNodeCount $newCx)) -ne $hits) {
+            return 'FAIL:删行数与 File 节点数变化不吻合（未写盘，防止误删兄弟插件条目）'
+        }
+        [IO.File]::WriteAllText($cxPath, $newCx, (New-Object System.Text.UTF8Encoding($hadBom)))
+        $back = [IO.File]::ReadAllText($cxPath).TrimStart([char]0xFEFF)
+        if (-not (Test-CxWellFormed $back) -or ($back -like "*$crxName*")) { throw '写盘后回读校验不通过' }
+        return 'OK'
+    } catch {
+        try { [IO.File]::WriteAllBytes($cxPath, $origBytes) } catch { }
+        return ('FAIL:' + $_.Exception.Message + '（已回滚）')
+    }
+}
 
 function Write-TextWithBom([string]$path, [string]$text) {
     [IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($true)))
@@ -604,31 +661,26 @@ foreach ($v in $versions) {
     }
 
     # ---------- 1b. 图纸环境 CRX 桥（只删本插件条目，绝不整体重写共享清单） ----------
-    # 顺序不能反：先摘 CxAutorun.cx 登记项，再删 .crx；否则重启 CAXA 会因悬空引用加载失败。
+    # 顺序不能反：先摘 CxAutorun.cx 登记项，再删 .crx；否则重启 CAXA 会因悬空引用加载失败（坑 168）。
+    # 每个名字单独一次「校验 → 写盘 → 回读 → 失败回滚」，摘不干净的那个绝不删文件。
     $crxBinDir  = Join-Path $caxaBin 'CAXADraft\Bin'
     $crxAutorun = Join-Path $caxaBin 'CAXADraft\Modules\CxAutorun.cx'
-    if (Test-Path $crxAutorun) {
-        try {
-            $cx = [IO.File]::ReadAllText($crxAutorun)
-            $changed = $false
-            foreach ($crxName in $crxNames) {
-                # 按文件名整行删除：登记行里的盘符大小写由写入方决定，不能靠字符串精确匹配
-                $pattern = '(?im)^[^\r\n]*' + [regex]::Escape($crxName) + '[^\r\n]*(?:\r?\n|$)'
-                if ([regex]::IsMatch($cx, $pattern)) {
-                    $cx = [regex]::Replace($cx, $pattern, '')
-                    $changed = $true
-                }
-            }
-            if ($changed) {
-                [IO.File]::WriteAllText($crxAutorun, $cx, (New-Object System.Text.UTF8Encoding($true)))
-                Write-Host "      CxAutorun.cx 已移除本插件登记项"
-            }
-        } catch {
-            Write-Host "      警告：CxAutorun.cx 清理异常 -> $($_.Exception.Message)" -ForegroundColor Yellow
+    $crxCleanFailed = @()
+    foreach ($crxName in $crxNames) {
+        $r = Remove-CxAutorunLine $crxAutorun $crxName
+        if ($r -eq 'OK') {
+            Write-Host "      CxAutorun.cx 已摘登记：$crxName"
+        } elseif ($r -like 'FAIL:*') {
+            Write-Host "      警告：CxAutorun.cx 清理失败 $crxName -> $r" -ForegroundColor Yellow
+            $crxCleanFailed += $crxName
             $hadError = $true
         }
     }
     foreach ($crxName in $crxNames) {
+        if ($crxCleanFailed -contains $crxName) {
+            Write-Host "      跳过删除 $crxName（登记未摘净，保留 .crx 避免启动期悬空引用）" -ForegroundColor Yellow
+            continue
+        }
         if (-not (Remove-FileSafe (Join-Path $crxBinDir $crxName))) { $hadError = $true }
     }
 
@@ -726,6 +778,15 @@ foreach ($v in $versions) {
     }
     $autorunCheck = Join-Path $caxaBin 'CAXADraft\Modules\CxAutorun.cx'
     if (Test-Path $autorunCheck) {
+        # 共享清单删完后必须仍是合法 XML：否则别人的 CRX 会被一并拖死（坑 167）
+        try {
+            $cxText = [IO.File]::ReadAllText($autorunCheck).TrimStart([char]0xFEFF)
+            if (-not (Test-CxWellFormed $cxText)) {
+                $left += "$($v.Name): CxAutorun.cx 已不是合法 XML（请检查是否被其它安装改写）"
+            }
+        } catch {
+            $left += "$($v.Name): CxAutorun.cx 读回失败 -> $($_.Exception.Message)"
+        }
         foreach ($needle in $crxNames) {
             if (Select-String -Path $autorunCheck -Pattern $needle -SimpleMatch -ErrorAction SilentlyContinue) {
                 $left += "$($v.Name): CxAutorun.cx 仍含 $needle"

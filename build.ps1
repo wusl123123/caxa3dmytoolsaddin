@@ -38,12 +38,14 @@ $idcToolProj = Join-Path $root 'tools\caxa3didcskill\caxa3didcskill.csproj'
 $idcToolExe  = Join-Path $root 'tools\caxa3didcskill\bin\x64\Release\net48\caxa3didcskill.exe'
 
 # 子插件：项目文件 + 暂存目录名（与插件 Id 一致）
+# ★ 2026-11-13 预热铁律（AGENTS 第 5 节）：预热载体 .exb 只随 Host 输出走，
+#   子插件 csproj 的 None Include 已删除、这里 Extra 不再登记 '.exb'；
+#   暂存时还显式过滤旧 bin 残留的同名文件 —— src\plugins 下出现该文件即判部署残留、打包打回。
 $plugins = @(
     @{ Name = 'caxa3dAttributeManageraddin'; Project = (Join-Path $root 'plugins\caxa3dAttributeManageraddin\caxa3dAttributeManageraddin.csproj') },
-    # 带图改名及图号分离：除 DLL 外还要带规则/说明/控件基线/CRX 注册脚本/CRX 桥本体，
-    # 以及图纸环境预热用的载体图纸 .exb（缺它冷启动预热直接失效，见插件总结「图纸环境预热」）
+    # 带图改名及图号分离：除 DLL 外还要带规则/说明/控件基线/CRX 注册脚本/CRX 桥本体
     @{ Name = 'caxa3dcodenameextraction';    Project = (Join-Path $root 'plugins\caxa3dcodenameextraction\caxa3dcodenameextraction.csproj');
-       Extra = @('.crx', '.txt', '.ini', '.exe', '.ps1', '.exb') },
+       Extra = @('.crx', '.txt', '.ini', '.exe', '.ps1') },
     # 材料工具：需带色卡.xml 与资料库种子 自定义材料.xml，以及回填规则模板 caxa3dsetMaterialaddfix.txt
     # （模板缺席时 BackfillRule 会静默回落到内置 DefaultText，改了项目内模板也不会生效）
     @{ Name = 'caxa3dsetMaterial';           Project = (Join-Path $root 'plugins\caxa3dsetMaterial\caxa3dsetMaterial.csproj');
@@ -55,19 +57,19 @@ $plugins = @(
     @{ Name = 'caxa3dTreeBom';               Project = (Join-Path $root 'plugins\caxa3dTreeBom\caxa3dTreeBom.csproj');
        Extra = @('.txt') },
     # 按钮工具（常用列）：由独立 Add-in caxa3dButton 移植为子插件（2026-11-09）。
-    # 预热载体图纸 caxa3d图纸环境预热.exb 必须随 DLL 走（MainForm.FindWarmupExb 从程序集目录逐级向上找）；
+    # 预热已上收集合体主界面（AGENTS 预热铁律）：本插件不带预热 UI / 自动预热 / 预热 .exb；
     # 图号分离规则 caxa3dButton图号分离规则.txt 放在插件目录时生效（缺席时界面上给出原因，不报错）
     @{ Name = 'caxa3dButton';                Project = (Join-Path $root 'plugins\caxa3dButton\caxa3dButton.csproj');
-       Extra = @('.exb', '.txt') },
+       Extra = @('.txt') },
     # 折弯管理大师：需带使用说明 .txt
     @{ Name = 'caxa3dsheetmaster';           Project = (Join-Path $root 'plugins\caxa3dsheetmaster\caxa3dsheetmaster.csproj');
        Extra = @('.txt') },
     # 工程图技术要求备份（系统工具列）：纯文件 + 注册表操作，无自带资源，只有 DLL
     @{ Name = 'caxa3dexbTechSpecsbak';       Project = (Join-Path $root 'plugins\caxa3dexbTechSpecsbak\caxa3dexbTechSpecsbak.csproj') },
     # 批量大师（常用列）：需带默认属性表格 .xlsx、两张用户规则 .txt、图纸环境 CRX 桥
-    # caxa3dBatchMasterView.crx（第 5 登记点，缺它「刷新工程图」整链不可用）与预热图纸 .exb
+    # caxa3dBatchMasterView.crx（第 5 登记点，缺它「刷新工程图」整链不可用）；预热 .exb 已上收 Host
     @{ Name = 'caxa3dBatchMaster';           Project = (Join-Path $root 'plugins\caxa3dBatchMaster\caxa3dBatchMaster.csproj');
-       Extra = @('.txt', '.crx', '.exb') },
+       Extra = @('.txt', '.crx') },
     # 后台进程清理（独立插件列）：DLL 只是启动器，真正干活的是随包部署的 caxa3didcskill.exe
     @{ Name = 'caxa3didcskill';              Project = (Join-Path $root 'plugins\caxa3didcskill\caxa3didcskill.csproj');
        Extra = @('.exe'); ExtraSrc = @($idcToolExe) }
@@ -101,7 +103,9 @@ foreach ($p in $plugins) {
     $extra = if ($p.Extra) { $p.Extra } else { @() }
     Get-ChildItem $out -File | Where-Object {
         ($_.Extension -in (@('.dll', '.pdb', '.xlsx', '.json', '.config') + $extra)) -and
-        ($_.Name -notlike 'Caxa3dMyTools.Contracts.*')
+        ($_.Name -notlike 'Caxa3dMyTools.Contracts.*') -and
+        # 旧版 csproj 的 Link 引用会在插件 bin 留载体副本；即使 Extra 已去掉 .exb 也不许带进暂存目录
+        ($_.Name -ne 'caxa3d图纸环境预热.exb')
     } | Copy-Item -Destination $dst -Force
 
     # 非本工程产出的运行期文件（如独立工具 EXE）显式补拷：缺件直接失败，不要静默少件

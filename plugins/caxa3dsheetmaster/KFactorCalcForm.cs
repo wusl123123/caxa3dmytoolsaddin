@@ -23,13 +23,6 @@ namespace caxa3dsheetmaster
         private DataGridView _grid;
         private static float _scale = 1f;
 
-        // ↓↓↓ 键盘归属抢救：Ctrl+C/V/X/A/Z 归本窗口自己的编辑单元（DataGridView 编辑框走托管 TextBoxBase）
-        protected override void OnActivated(EventArgs e) { base.OnActivated(e); Caxa3dMyTools.Contracts.ChordRescue.Install(this, msg => Diagnostics.Trace(msg)); }
-        protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口失活"); }
-        protected override void OnFormClosed(FormClosedEventArgs e) { base.OnFormClosed(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口关闭"); }
-        protected override void WndProc(ref Message m) { if (Caxa3dMyTools.Contracts.ChordRescue.Route(this, ref m)) return; base.WndProc(ref m); }
-        // ↑↑↑
-
         public KFactorCalcForm()
         {
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
@@ -248,5 +241,12 @@ namespace caxa3dsheetmaster
                 || double.TryParse(text, System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out value);
         }
+
+        // ↓↓↓ 键盘归属抢救：Ctrl+C/V/X/A/Z 归本窗口自己的编辑单元（DataGridView 编辑框走托管 TextBoxBase）
+        protected override void OnActivated(EventArgs e) { base.OnActivated(e); Caxa3dMyTools.Contracts.ChordRescue.Install(this, msg => Diagnostics.Trace(msg)); }
+        protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口失活"); }
+        protected override void OnFormClosed(FormClosedEventArgs e) { base.OnFormClosed(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口关闭"); }
+        protected override void WndProc(ref Message m) { if (Caxa3dMyTools.Contracts.ChordRescue.Route(this, ref m)) return; base.WndProc(ref m); }
+        // ↑↑↑
     }
 }
