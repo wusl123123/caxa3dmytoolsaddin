@@ -51,6 +51,7 @@ namespace caxa3dButton
         private Button _btnHideAllTypes;
         private Button _btnShowAllTypes;
         private Button _btnAssemblySort;
+        private Button _btnActivatePart;
         private Button _btnStop;
         private CubeForm _cubeForm;
         private AssemblySortForm _assemblySortForm;
@@ -211,6 +212,10 @@ namespace caxa3dButton
             _btnAssemblySort = MakeButton("装配体排序", 296, 80, 110);
             _btnAssemblySort.Click += OnAssemblySortClick;
 
+            // 激活 / 取消激活零件（移植自 caxa3dtracker，WM_COMMAND 53111）
+            _btnActivatePart = MakeButton("激活/取消激活零件", 418, 80, 150);
+            _btnActivatePart.Click += delegate { RunActivateToggle(); };
+
             // ---- 小工具表格区（四列，单元格 = 工具）----
             _grid = BuildGrid();
             _grid.Bounds = new Rectangle(12, TableTop, 656, _tableHeight);
@@ -235,7 +240,7 @@ namespace caxa3dButton
             Controls.AddRange(new Control[] {
                 _btnTopMost, _btnDrawNoSep, _btnLog, _btnSaveLog, _btnClearLog,
                 _btnOpenEnv, _btnCloseEnv, _btnOpenDwg, _btnCube, _btnStop,
-                _btnHideAllTypes, _btnShowAllTypes, _btnAssemblySort,
+                _btnHideAllTypes, _btnShowAllTypes, _btnAssemblySort, _btnActivatePart,
                 _grid, _lblStatus, _txtLog });
 
             FillTable();
@@ -1563,6 +1568,37 @@ namespace caxa3dButton
             }
         }
 
+        // ------------------------------------------------------------ 激活 / 取消激活零件
+        // 移植自 caxa3dtracker PartActivateTool：WM_COMMAND 53111（IsEngineAfxLg STRINGTABLE 53111
+        // 「激活\取消激活」＝Ctrl+Shift+A）。TLB 全域穷举零「零件激活状态」读 API，无法回读验证，
+        // 一切以 PostMessage 入队证据为准，是否生效让 CAXA 视口/设计树自证。
+
+        private void RunActivateToggle()
+        {
+            Diagnostics.Log("RunActivateToggle.Click");
+            int gate;
+            string summary;
+            try { gate = PartActivateTool.GateState(_siteApp, out summary, AppendLog); }
+            catch (Exception ex) { gate = -1; summary = "会话异常：" + ex.Message; Diagnostics.Log("GateState fail: " + ex); }
+
+            if (gate == -1)
+            {
+                SetStatus("读不到选择集：" + summary, Color.Firebrick);
+                return;
+            }
+            if (gate == 0)
+            {
+                SetStatus("未选中零件：请先在 CAXA 视口/设计树里选中零件再点本按钮", Color.DimGray);
+                return;
+            }
+
+            string verdict;
+            try { verdict = PartActivateTool.Toggle(_siteApp, AppendLog); }
+            catch (Exception ex) { verdict = "投递异常：" + ex.Message; Diagnostics.Log("Toggle fail: " + ex); }
+
+            SetStatus(verdict, verdict.StartsWith("已投递") ? Color.Black : Color.Firebrick);
+        }
+
         // ================================================================ 打开工程图联动动作
         // 钣金件 → 工程图标题栏设默认（走 codenameextraction CRX：CMD:TITLEBLOCK_3DSET）
         // 装配   → 更新3dbom（代点法，对齐 caxa3dexbtracker 口径：CRX 派发 CX_DFT_Update3DBom →
@@ -1576,11 +1612,11 @@ namespace caxa3dButton
             if (postAction == "titleblock")
             {
                 if (string.IsNullOrEmpty(exbPath)) { Diagnostics.Log("open-dwg: titleblock 中止 — exb 路径为空"); return; }
-                bool ready = WaitUntil("等图纸命令桥(codenameextraction CRX)就绪", 25000,
+                bool ready = WaitUntil("等图纸命令桥(caxa3ddiffrename CRX)就绪", 25000,
                     CodenameBridge.IsCrxLoaded, 400);
                 if (!ready)
                 {
-                    SetStatus("标题栏设默认中止：图纸命令桥 25s 内未就绪（请确认 caxa3dcodenameextraction.crx 已随图纸模块加载）",
+                    SetStatus("标题栏设默认中止：图纸命令桥 25s 内未就绪（请确认 caxa3ddiffrename.crx 已随图纸模块加载）",
                         Color.Firebrick);
                     Diagnostics.Log("open-dwg: titleblock 中止 — CRX 未就绪");
                     return;
@@ -1607,7 +1643,7 @@ namespace caxa3dButton
                 //   图纸已由 open-dwg 确认打开 → 等 CRX 就绪 → 让位 → 派发前先布防哨兵 →
                 //   派 CX_DFT_Update3DBom → 等 CRX 接单 → 哨兵勾「更新」点「确定」→
                 //   权威完成信号 = CRX 报 commandEnded | CX_DFT_Update3DBom（模态框关掉那一刻才结束）。
-                bool ready = WaitUntil("等图纸命令桥(codenameextraction CRX)就绪", 25000,
+                bool ready = WaitUntil("等图纸命令桥(caxa3ddiffrename CRX)就绪", 25000,
                     CodenameBridge.IsCrxLoaded, 400);
                 if (!ready)
                 {

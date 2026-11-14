@@ -106,7 +106,7 @@ Write-Host "缺件校验通过：独立插件 caxa3didcskill（启动器 DLL + �
 # ---------- 插件自带资源缺件校验（不算扩展名白名单，逐个点名） ----------
 # 预热 .exb 已于 2026-11-13 从本表移除：它现在归 Host，放在交付件根目录（见校验 A/C）。
 $requiredRes = @(
-    @{ Plugin = 'caxa3dcodenameextraction'; File = 'ExbLinkPatch.exe';          Why = 'exb 外链就地改写工具' },
+    @{ Plugin = 'caxa3ddiffrename'; File = 'ExbLinkPatch.exe';          Why = 'exb 外链就地改写工具' },
     @{ Plugin = 'caxa3dsetMaterial';        File = 'caxa3dsetMaterialaddfix.txt'; Why = '材料属性回填规则模板（缺席时 BackfillRule 静默回落到内置 DefaultText，改项目内模板不生效）' },
     # 批量大师：两件缺一都会静默降级（CRX 缺席＝「刷新工程图」永远等不到图纸环境应答；
     # 表格缺席＝首次使用没有默认列）
@@ -164,6 +164,16 @@ Copy-Item $hostDll  $stage -Force
 Copy-Item $contract $stage -Force
 Copy-Item $warmExb  $stage -Force
 
+# ---------- CAXA 环境配置包（.ucex） ----------
+# ★ 用户基础环境配置包：集合体不干预 CAXA 自带功能的安装时机，安装脚本（deploy.ps1）
+# 一律不把 .ucex 拷进 CAXA 目录；由用户启动 CAXA 后，通过「工具 → 环境配置 → 导入」自行加载。
+# 打包只负责把 .ucex 带到交付件根目录，与 README.txt 同级。
+foreach ($f in @('2024环境配置.ucex', '2027环境配置.ucex')) {
+    $src = Join-Path $root $f
+    if (Test-Path $src) { Copy-Item $src $stage -Force }
+    else { Write-Host "[警告] 缺少环境配置包 $f（仓库根目录应存在，用户可后补）" -ForegroundColor Yellow }
+}
+
 # ---------- 子插件（每个插件一个子目录，只取运行期文件） ----------
 # 按扩展名白名单收集：**插件新增自带资源类型时必须同步这里**（.pdb 除外），
 # 漏一个就是静默缺件。.exb 保留只为兼容其它业务图纸，预热 .exb 禁止出现在 plugins 下（见下方校验）。
@@ -203,6 +213,11 @@ CAXA 3D 插件集合体（主程序 + 全部子插件，交付件不含源码）
   caxa3d图纸环境预热.exb 只放在本目录（与 caxa3dmytoolsaddin.dll 同级），
   安装脚本会把它拷到 CAXA bin 根；主界面的「图纸环境预热」从 Contracts.dll 位置逐级向上找它。
   plugins\<插件名>\ 下不允许出现该文件；子插件不再自带预热入口、状态灯或启动自动预热。
+
+CAXA 环境配置包（2024环境配置.ucex / 2027环境配置.ucex）
+  这两个文件只随交付件走，安装脚本一律不把它们拷进 CAXA 目录，也不自动导入。
+  启用方式：启动 CAXA 3D → 工具 → 环境配置 → 导入 → 选对版本的 .ucex。
+  （2024版对应 CAXA 3D 2024，2027版对应 CAXA 3D 2027 及以上；高版本向下兼容 2024 配置包）
 
 说明
   - 本目录所有 .ps1 必须保持单个 UTF-8 BOM（bat 已自动校正）
@@ -245,6 +260,7 @@ Write-Host "  文件夹 : $stage"
 Write-Host "  压缩包 : $zip"
 Write-Host "交付内容（解压后）："
 Write-Host "  caxa3dmytoolsaddin.dll / Caxa3dMyTools.Contracts.dll / $warmExbName"
+Write-Host "  2024环境配置.ucex / 2027环境配置.ucex（★ 用户自行加载，安装脚本不处理）"
 Write-Host "  plugins\<插件名>\<插件名>.dll  (+ 插件自带资源，不含预热 .exb)"
 Write-Host "  plugins\caxa3didcskill\caxa3didcskill.exe  (独立插件列的后台进程清理工具)"
 Write-Host "  deploy.ps1 / restore.ps1 / 安装.bat / 卸载.bat / README.txt"

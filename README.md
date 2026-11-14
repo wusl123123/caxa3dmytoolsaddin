@@ -31,7 +31,7 @@ CAXA 3D 内置插件集合体（Add-in Host）与统一工具箱。CAXA 3D 中�
 | 插件 Id | 界面名称 | 功能概述 |
 | --- | --- | --- |
 | `caxa3dAttributeManageraddin` | 自定义属性管理器 | 基于 xlsx 属性表批量读写自定义属性，共享表精确匹配 |
-| `caxa3dcodenameextraction` | 带图改名及图号分离 | 图纸环境 CRX 桥、图号分离、批量改名、弹窗代点 |
+| `caxa3ddiffrename` | 带图改名及图号分离 | 图纸环境 CRX 桥、图号分离、批量改名、弹窗代点 |
 | `caxa3dsetMaterial` | 材料工具 | 材料 / 密度 / 颜色批量设置，色卡与材料资料库；材料分类页签可横向滚动、支持通配符搜索并定位到行 |
 | `caxa3dTreeBom` | 树形BOM | 按装配层级构建 BOM 并导出 Excel，合并规则可配；表头列取值走三通道阶梯（自定义属性共享表 → BOM 导出兜底 → 专用兜底），每格来源可悬停追溯，逐列候选名/开关在 `%APPDATA%\caxa3dTreeBom\caxa3dTreeBom表头字段映射.txt` |
 | `caxa3dButton` | 按钮工具 | 日常工具合集：图号分离、3D BOM 更新、打印 PDF、另存 DWG、部件规格填充、代号桥、组件 / 设计环境工具、图纸探针、尺寸检查、字体替换，及曲线 / 元素 / 特征 / 内核 / 点 / 锚等调试类小工具 |
@@ -41,7 +41,7 @@ CAXA 3D 内置插件集合体（Add-in Host）与统一工具箱。CAXA 3D 中�
 | `caxa3didcskill` | 后台进程清理 | 系统工具列启动器，拉起进程外的 `caxa3didcskill.exe` 清理无窗口 IRONCAD 残留进程 |
 | `caxa3dexbTechSpecsbak` | 工程图技术要求备份 | 按 CAXA 版本年度备份/还原「我的技术要求」`NSpecLib.xml`，zip 内带清单、逐项 SHA256 校验、还原前自动留 `.bak` |
 
-工具箱窗口按 `IPlugin.Category` 分四列表格排列：`1. 常用插件`（`BuiltIn`，8 个：`caxa3dAttributeManageraddin`、`caxa3dcodenameextraction`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dButton`、`caxa3dsheetmaster`、`caxa3dBatchMaster`、`caxa3dCXDFTViewUpdate`）、`2. 系统工具`（`SystemTool`，2 个：`caxa3didcskill`、`caxa3dexbTechSpecsbak`）；`Independent`、`Test` 两类当前无插件（`caxa3dminitool` 已并入 `caxa3dButton`，测试类 `Caxa3dcudeaddin` / `caxa3dapigetaddin` 已删除）。
+工具箱窗口按 `IPlugin.Category` 分四列表格排列：`1. 常用插件`（`BuiltIn`，8 个：`caxa3dAttributeManageraddin`、`caxa3ddiffrename`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dButton`、`caxa3dsheetmaster`、`caxa3dBatchMaster`、`caxa3dCXDFTViewUpdate`）、`2. 系统工具`（`SystemTool`，2 个：`caxa3didcskill`、`caxa3dexbTechSpecsbak`）；`Independent`、`Test` 两类当前无插件（`caxa3dminitool` 已并入 `caxa3dButton`，测试类 `Caxa3dcudeaddin` / `caxa3dapigetaddin` 已删除）。
 
 > 独立插件的形态：`plugins\caxa3didcskill\` 里 DLL 只是**启动器**（不引用 ICAPI、不建窗口、不实现业务逻辑），点单元格时由它启动同目录的 `caxa3didcskill.exe`；已有实例则切前台，不重复启动。进程清理只能在进程外做（规则 16.6），EXE 源码在 `tools\caxa3didcskill\`，随安装包一起部署到 `plugins\caxa3didcskill\`。
 
@@ -62,7 +62,7 @@ caxa3dmytoolsaddin/
 │   └── plugins/                   插件编译产物汇总目录（主程序运行时扫描，构建生成）
 └── plugins/                       各插件独立解决方案（可单独打开维护）
     ├── caxa3dAttributeManageraddin/
-    ├── caxa3dcodenameextraction/
+    ├── caxa3ddiffrename/
     ├── caxa3dsetMaterial/
     ├── caxa3dTreeBom/
     ├── caxa3dButton/              按钮工具（原 caxa3dminitool 改名扩充，含 CRX 桥子工程与图纸环境预热 exb）

@@ -43,9 +43,10 @@ $idcToolExe  = Join-Path $root 'tools\caxa3didcskill\bin\x64\Release\net48\caxa3
 #   暂存时还显式过滤旧 bin 残留的同名文件 —— src\plugins 下出现该文件即判部署残留、打包打回。
 $plugins = @(
     @{ Name = 'caxa3dAttributeManageraddin'; Project = (Join-Path $root 'plugins\caxa3dAttributeManageraddin\caxa3dAttributeManageraddin.csproj') },
-    # 带图改名及图号分离：除 DLL 外还要带规则/说明/控件基线/CRX 注册脚本/CRX 桥本体
-    @{ Name = 'caxa3dcodenameextraction';    Project = (Join-Path $root 'plugins\caxa3dcodenameextraction\caxa3dcodenameextraction.csproj');
-       Extra = @('.crx', '.txt', '.ini', '.exe', '.ps1') },
+    # 带图改名及图号分离：除 DLL 外还要带规则/说明/控件基线/CRX 桥本体
+    # （CRX 注册由 deploy.ps1 第五登记点统一完成，插件目录不再带注册/卸载脚本）
+    @{ Name = 'caxa3ddiffrename';            Project = (Join-Path $root 'plugins\caxa3ddiffrename\caxa3ddiffrename.csproj');
+       Extra = @('.crx', '.txt', '.ini', '.exe') },
     # 材料工具：需带色卡.xml 与资料库种子 自定义材料.xml，以及回填规则模板 caxa3dsetMaterialaddfix.txt
     # （模板缺席时 BackfillRule 会静默回落到内置 DefaultText，改了项目内模板也不会生效）
     @{ Name = 'caxa3dsetMaterial';           Project = (Join-Path $root 'plugins\caxa3dsetMaterial\caxa3dsetMaterial.csproj');

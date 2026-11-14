@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -1876,7 +1876,7 @@ namespace caxa3dBatchMaster
             if (!reached)
             {
                 r.TitleBlockInfo = "标题栏 3D 信息 300 秒内无结果（CRX 未确认变化）";
-                r.Notes.Add("标题栏 3D 信息设置超时，请查看 %TEMP%\\caxa3dcodenameextraction_crx.log 里的 tb-* 记录。");
+                r.Notes.Add("标题栏 3D 信息设置超时，请查看 %TEMP%\\caxa3ddiffrename_crx.log 里的 tb-* 记录。");
             }
             else if (tbOk)
             {

@@ -350,19 +350,20 @@ function Get-CaxaVersionDirs {
 # 2026-11-07 补入 caxa3dBatchMaster：独立 Add-in 若仍登记就抢在集合体前面被加载，
 # LoadFrom 返回的是已加载那份（同为 1.0.0.0 / PKT 56647e1eee90f6d4）⇒ 工具箱静默缺席。
 # 2026-11-09 补入 caxa3dButton：按钮工具移植为子插件，独立 Add-in 若仍登记会与集合体重复弹窗。
-$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll')
-$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton')
-$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}')
+$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll', 'caxa3ddiffrename.dll')
+$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton', 'caxa3ddiffrename')
+$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}', '{6E2015C2-DBF7-47E7-BC12-B3EA50738B85}')
 
 # 已移出集合体的图纸环境 CRX 桥：部署时清掉 CAXADraft\bin 旧文件与 CxAutorun.cx 旧登记行
-$removedCrxs = @('caxa3dminitool.crx', 'caxa3dapigetaddin.crx')
+# caxa3dcodenameextraction.crx 是子插件改名前（与独立插件同名化）的旧桥，必须连登记行一起清（坑 168）
+$removedCrxs = @('caxa3dminitool.crx', 'caxa3dapigetaddin.crx', 'caxa3dcodenameextraction.crx')
 
 # 图纸环境 CRX 桥：插件目录 -> 随包 .crx（[3b/5] 逐个拷进 CAXADraft\bin 并登记 CxAutorun.cx）
 $crxItems = @(
-    @{ Crx = 'caxa3dcodenameextraction.crx'; Plugin = 'caxa3dcodenameextraction' },
+    @{ Crx = 'caxa3ddiffrename.crx'; Plugin = 'caxa3ddiffrename' },
     @{ Crx = 'caxa3dCXDFTViewUpdate.crx';    Plugin = 'caxa3dCXDFTViewUpdate' },
     # 批量大师「刷新工程图 / 图号分离（图纸链）」的执行体（11-07 随插件迁入集合体）。
-    # 临时文件名前缀 caxa3dBatchMaster_（ViewBridge.Prefix），与 codenameextraction 互不冲突。
+    # 临时文件名前缀 caxa3dBatchMaster_（ViewBridge.Prefix），与 caxa3ddiffrename 互不冲突。
     @{ Crx = 'caxa3dBatchMasterView.crx';    Plugin = 'caxa3dBatchMaster' }
 )
 
@@ -863,6 +864,11 @@ foreach ($v in $versions) {
     }
     if (-not $copyOk) { $hadError = $true; continue }
     Write-Host "[2/5] 主程序 / 契约 / 预热载体已拷贝到 $caxaBin"
+
+    # ★ 2026-11-14：CAXA 环境配置包（2024环境配置.ucex / 2027环境配置.ucex）只随交付件走、
+    # 安装脚本不处理。理由：CAXA 自带的环境配置导入走用户显式的「工具 → 环境配置 → 导入」
+    # 菜单，命令行/注册表层面没有入口，也不应由集合体干预 CAXA 自带功能的安装时机；
+    # 两者文件与 warmExb 同级放在交付件根目录，用户自行加载即可。
 
     # pdb 只是调试符号，拷不上不影响运行
     if ($pdbPath -and (Test-Path $pdbPath)) {

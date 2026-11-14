@@ -6,22 +6,22 @@ using System.Text;
 namespace caxa3dButton
 {
     /// <summary>
-    /// 与 CRX 桥接模块（caxa3dcodenameextraction.crx）的通信封装。
+    /// 与 CRX 桥接模块（caxa3ddiffrename.crx，原 caxa3dcodenameextraction.crx）的通信封装。
     ///
-    /// C# → CRX：把命令写进请求文件 %TEMP%\caxa3dcodenameextraction_request.txt，
+    /// C# → CRX：把命令写进请求文件 %TEMP%\caxa3ddiffrename_request.txt，
     ///            CRX 内的 100ms 定时器发现后读取、删除，并把命令投递到当前图纸文档执行。
     /// CRX → C#：CRX 把 commandWillStart/commandEnded 等事件追加到
-    ///            %TEMP%\caxa3dcodenameextraction_crx.log，本类按偏移量增量读取，
+    ///            %TEMP%\caxa3ddiffrename_crx.log，本类按偏移量增量读取，
     ///            用于等待 CX_DFT_ViewClose / close-done 等结果。
     /// </summary>
     internal static class CodenameBridge
     {
         public static readonly string RequestPath =
-            Path.Combine(Path.GetTempPath(), "caxa3dcodenameextraction_request.txt");
+            Path.Combine(Path.GetTempPath(), "caxa3ddiffrename_request.txt");
         public static readonly string LogPath =
-            Path.Combine(Path.GetTempPath(), "caxa3dcodenameextraction_crx.log");
+            Path.Combine(Path.GetTempPath(), "caxa3ddiffrename_crx.log");
         public static readonly string MarkerPath =
-            Path.Combine(Path.GetTempPath(), "caxa3dcodenameextraction_crx.marker");
+            Path.Combine(Path.GetTempPath(), "caxa3ddiffrename_crx.marker");
 
         /// <summary>CRX 模块是否已加载：探针存在且写入时间晚于本进程启动时间。
         /// 上次会话异常退出遗留的过期探针不算（否则 CRX 尚未加载也误判已加载）。</summary>

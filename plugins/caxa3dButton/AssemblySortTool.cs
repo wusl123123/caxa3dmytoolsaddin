@@ -1,5 +1,12 @@
 // 装配体排序（用户 2026-11-13 需求；第四版 = 排序根改「选中装配体」）
 //
+// ★ 11-14 13:28 优化：新增「优先排序特征符号」（窗体在排序方式上方新增输入区，默认一个空格 " "）★
+//   排序键变成两级：① 名称是否含该符号 —— 含者恒排前，**不受升/降序影响**；
+//                  ② 组内仍按 IZElement.Name 升/降序，同名保持原始次序（稳定）。
+//   符号可由用户改成任意字符串（Ordinal 子串匹配）；留空 ⇒ 跳过 ①，行为与旧版完全一致。
+//   ★ 只改排序比较逻辑；写侧 MoveToReferenceLocation(槽39) 与「每步重读同级」权威判据**一字未动**。
+//   日志里空格写成「（空格）」、空串写成「（空）」，避免不可见字符造成误判。
+//
 // ★ 14:16 实机 trace 定案的语义（用户口径）★
 //   「只排第一层」= **选中装配体的直接子零部件**排序，不是场景顶层；
 //   「穿透到底」= 在同一个根上逐层进入子装配。
@@ -71,6 +78,9 @@ namespace caxa3dButton
         {
             public bool Ascending = true;         // 与降序互斥
             public bool PenetrateAll = false;     // false=只排第一层（选中装配体的直接子零部件）/ true=穿透到底（互斥）
+            /// <summary>11-14 13:28 新增：优先排序特征符号，默认一个空格。名称含该符号者恒排前，
+            /// 组内仍按零件名升/降序；空串/null ⇒ 不做优先分组（等同旧版纯按名排序）。</summary>
+            public string PrioritySymbol = " ";
         }
 
         private sealed class Report
@@ -98,7 +108,9 @@ namespace caxa3dButton
             if (opt == null) opt = new Options();
 
             log(tag + ": ==== 装配体排序 ==== 全零部件 方向=" + (opt.Ascending ? "升序" : "降序") +
-                " 穿透=" + (opt.PenetrateAll ? "到底" : "第一层（选中装配体的直接子零部件）"));
+                " 穿透=" + (opt.PenetrateAll ? "到底" : "第一层（选中装配体的直接子零部件）") +
+                " 优先符号=" + DescribeSymbol(opt.PrioritySymbol) +
+                (string.IsNullOrEmpty(opt.PrioritySymbol) ? "（不做优先分组）" : "（含符号组恒在前，不受升降序影响）"));
 
             string err;
             IZSceneDoc scene = ProbeCommon.GetScene(app, out err);
@@ -168,6 +180,7 @@ namespace caxa3dButton
             }
 
             sb.Append("装配体排序完成：排序根").Append(rep.RootName)
+              .Append(" / 优先符号").Append(DescribeSymbol(opt.PrioritySymbol))
               .Append(" / 层级 ").Append(rep.Levels)
               .Append(" 层 / 参与零部件 ").Append(rep.Parts)
               .Append(" 项 / 实际移动 ").Append(rep.Moves).Append(" 次");
@@ -239,7 +252,7 @@ namespace caxa3dButton
             }
             else
             {
-                List<IZElement> sorted = SortByName(participants, opt.Ascending, log);
+                List<IZElement> sorted = SortByName(participants, opt.Ascending, opt.PrioritySymbol, log);
                 if (rep.SortedPreview.Count == 0)
                     foreach (IZElement p in sorted)
                         if (rep.SortedPreview.Count < 30) rep.SortedPreview.Add(SafeName(p));
@@ -262,24 +275,57 @@ namespace caxa3dButton
             }
         }
 
-        /// <summary>按 Name 排序；同名用原始次序做稳定 tie-break；中文用当前区域比较（拼音习惯）。</summary>
-        private static List<IZElement> SortByName(List<IZElement> src, bool ascending, Action<string> log)
+        /// <summary>
+        /// 排序键（11-14 13:28 优化）：① 名称是否含优先符号（含者恒在前，**不受升降序影响**）
+        /// → ② 零件名（CurrentCultureIgnoreCase，中文按拼音习惯，升/降序只作用于这一级）
+        /// → ③ 原始次序做稳定 tie-break。
+        /// 优先符号为空 ⇒ 跳过 ①，行为与旧版完全一致（向后兼容）。
+        /// </summary>
+        private static List<IZElement> SortByName(List<IZElement> src, bool ascending, string prioritySymbol, Action<string> log)
         {
             var idx = new List<int>();
             for (int i = 0; i < src.Count; i++) idx.Add(i);
             var names = new string[src.Count];
             for (int i = 0; i < src.Count; i++) names[i] = SafeName(src[i]);
+
+            bool usePriority = !string.IsNullOrEmpty(prioritySymbol);
+            var hasSymbol = new bool[src.Count];
+            int nPriority = 0;
+            if (usePriority)
+            {
+                for (int i = 0; i < src.Count; i++)
+                {
+                    // Ordinal：符号/空格/中文按字面匹配，不受区域规则影响，行为可预测
+                    hasSymbol[i] = names[i].IndexOf(prioritySymbol, StringComparison.Ordinal) >= 0;
+                    if (hasSymbol[i]) nPriority++;
+                }
+            }
+
             int sign = ascending ? 1 : -1;
             idx.Sort(delegate (int a, int b)
             {
+                if (usePriority && hasSymbol[a] != hasSymbol[b])
+                    return hasSymbol[a] ? -1 : 1;   // 含符号恒在前
                 int c = string.Compare(names[a], names[b], StringComparison.CurrentCultureIgnoreCase);
                 if (c != 0) return c * sign;
                 return a.CompareTo(b);   // 同名保持原始次序，降序也稳定
             });
             var result = new List<IZElement>();
             foreach (int i in idx) result.Add(src[i]);
-            log("asm-sort: 排序键=IZElement.Name，" + (ascending ? "升序" : "降序") + " ⇒ " + Names(result));
+            string groupNote = usePriority
+                ? "含符号 " + nPriority + " 项优先，其余 " + (src.Count - nPriority) + " 项在后；组内"
+                : "（不做优先分组）；";
+            log("asm-sort: 排序键=优先符号" + DescribeSymbol(prioritySymbol) + " " + groupNote +
+                "按 IZElement.Name " + (ascending ? "升序" : "降序") + " ⇒ " + Names(result));
             return result;
+        }
+
+        /// <summary>日志可读化：空格不可见，单独写「空格」；空串写「空」。</summary>
+        private static string DescribeSymbol(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "（空）";
+            if (s == " ") return "（空格）";
+            return "「" + s + "」";
         }
 
         /// <summary>

@@ -345,15 +345,15 @@ function Get-CaxaVersionDirs {
 # ★ 这三张表必须与 deploy.ps1 的同名三张表**完全一致**（2026-11-13 对齐为 10 项）：
 #   之前这里只列了 3 项，卸载后 bin 根会留下另外 5 个已迁入插件的旧 DLL；
 #   2026-11-09 deploy 补入 caxa3dButton 后这里又漏了一项，本轮补齐 —— 漏一项就是「已全部卸载」假结论。
-$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll')
-$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton')
-$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}')
+$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll', 'caxa3ddiffrename.dll')
+$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton', 'caxa3ddiffrename')
+$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}', '{6E2015C2-DBF7-47E7-BC12-B3EA50738B85}')
 
 # 部署时投放到 CAXADraft\bin 的图纸环境 CRX 桥（第 5 登记点）。
 # 与 deploy.ps1 的 $crxItems + $removedCrxs 对齐：caxa3dapigetaddin.crx 是 deploy 会主动清理的
 # 已下线桥，之前这里漏登记；caxa3dapicapture.crx 由 caxa3dapigetaddin 的「注册CRX模块」手工登记，
 # 一并清理历史残留。清单与残留校验共用这一个变量，避免两处各写一份而漏项。
-$crxNames = @('caxa3dcodenameextraction.crx', 'caxa3dCXDFTViewUpdate.crx',
+$crxNames = @('caxa3ddiffrename.crx', 'caxa3dcodenameextraction.crx', 'caxa3dCXDFTViewUpdate.crx',
               'caxa3dminitool.crx', 'caxa3dBatchMasterView.crx', 'caxa3dapicapture.crx',
               'caxa3dapigetaddin.crx')
 
@@ -565,7 +565,7 @@ function Get-OwnBinFile([string]$bin) {
     foreach ($f in @(Get-ChildItem -LiteralPath $bin -File -ErrorAction SilentlyContinue)) {
         $n = $f.Name
         foreach ($b in $ownBases) {
-            # 前缀匹配（旧布局把资源名接在插件名后面，如「caxa3dcodenameextraction使用说明.txt」），
+            # 前缀匹配（旧布局把资源名接在插件名后面，如「caxa3ddiffrename使用说明.txt」），
             # 但必须同时满足扩展名白名单，避免误伤同前缀的其它文件
             if (($n -like "$b.dll.*") -or ($n -like "$b.*.inuse-*") -or
                 (($n.StartsWith($b, [StringComparison]::OrdinalIgnoreCase)) -and

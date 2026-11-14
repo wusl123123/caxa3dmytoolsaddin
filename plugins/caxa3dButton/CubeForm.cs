@@ -26,7 +26,7 @@ namespace caxa3dButton
     {
         private readonly IZBaseApp _siteApp;
         private CaxaSession _session;
-        /// <summary>长流程防重入：建立基体与智能标注互斥。</summary>
+        /// <summary>长流程防重入：建立基体互斥。</summary>
         private bool _busy;
 
         /// <summary>上次输入尺寸（mm）的保存路径，打开时回填。</summary>
@@ -73,7 +73,6 @@ namespace caxa3dButton
         /// <summary>联动回填壁厚时防 TextChanged 递归。</summary>
         private bool _autoFillingWall;
 
-        private readonly Button _btnAnnotate = new Button();
         private readonly Label _lblStatus = new Label();
         private readonly Label _lblResult = new Label();
 
@@ -168,16 +167,12 @@ namespace caxa3dButton
             _lblResult.SetBounds(12, y2 + 58, 596, 20);
             _lblResult.Text = string.Empty;
 
-            _btnAnnotate.SetBounds(12, y2 + 84, 100, 28);
-            _btnAnnotate.Text = "智能标注";
-            _btnAnnotate.Click += BtnAnnotate_Click;
-
             Controls.AddRange(new Control[] {
                 _lblLength, _txtLength, _lblWidth, _txtWidth, _lblHeight, _txtHeight, _btnBox,
                 _lblDia, _txtDia, _lblCylHeight, _txtCylHeight, _btnCylinder,
                 _lblTubeDia, _txtTubeDia, _lblTubeWall, _txtTubeWall, _lblTubeHeight, _txtTubeHeight,
                 _btnTubeShell,
-                _lblStatus, _lblResult, _btnAnnotate });
+                _lblStatus, _lblResult });
         }
 
         protected override void OnLoad(EventArgs e)
@@ -427,7 +422,6 @@ namespace caxa3dButton
             _btnBox.Enabled = false;
             _btnCylinder.Enabled = false;
             _btnTubeShell.Enabled = false;
-            _btnAnnotate.Enabled = false;
 
             try
             {
@@ -490,7 +484,6 @@ namespace caxa3dButton
                     _btnBox.Enabled = true;
                     _btnCylinder.Enabled = true;
                     _btnTubeShell.Enabled = true;
-                    _btnAnnotate.Enabled = true;
                 }
             }
         }
@@ -526,63 +519,6 @@ namespace caxa3dButton
             RunCreate("圆柱体", "正在建立圆柱体（图素）…",
                 delegate { return CaxaAutomation.CreateCylinderAtOrigin(_session, dia, h); },
                 string.Format(CultureInfo.InvariantCulture, "已建立 直径{0} × 高{1} mm（底面中心与原点重合）", dia, h));
-        }
-
-        // ---------------------------------------------------------------- 智能标注
-
-        /// <summary>
-        /// 草图智能标注（Phase 1）：TLB 无「创建尺寸」写接口 ⇒ 打开显示开关并回读 + 枚举草图尺寸关系。
-        /// 收尾只走状态栏／结果行，不弹模态框（模态会禁用 CAXA 主界面）。
-        /// </summary>
-        private void BtnAnnotate_Click(object sender, EventArgs e)
-        {
-            Diagnostics.Log("btnAnnotate.Click");
-            if (_busy) return;
-
-            try
-            {
-                EnsureConnected();
-            }
-            catch (Exception ex)
-            {
-                Diagnostics.Log("Connect failed: " + ex);
-                _lblStatus.ForeColor = Color.Firebrick;
-                _lblStatus.Text = "CAXA 3D 会话建立失败（重新打开窗口重试）";
-                return;
-            }
-
-            _busy = true;
-            _btnAnnotate.Enabled = false;
-            _btnBox.Enabled = false;
-            _btnCylinder.Enabled = false;
-            _btnTubeShell.Enabled = false;
-            try
-            {
-                _lblStatus.ForeColor = Color.Black;
-                _lblStatus.Text = "正在执行智能标注（显示 + 读取）…";
-                _lblResult.Text = string.Empty;
-                string verdict = CaxaAutomation.AnnotateLastSketch(_session);
-                SetConnectedStatus();
-                _lblResult.ForeColor = Color.Green;
-                _lblResult.Text = verdict;
-            }
-            catch (Exception ex)
-            {
-                Diagnostics.Log("Annotate failed: " + ex);
-                _lblResult.ForeColor = Color.Firebrick;
-                _lblResult.Text = "智能标注失败";
-            }
-            finally
-            {
-                _busy = false;
-                if (!IsDisposed)
-                {
-                    _btnAnnotate.Enabled = true;
-                    _btnBox.Enabled = true;
-                    _btnCylinder.Enabled = true;
-                    _btnTubeShell.Enabled = true;
-                }
-            }
         }
     }
 }
