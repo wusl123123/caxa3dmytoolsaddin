@@ -49,6 +49,8 @@ namespace caxa3dBatchMaster
         private readonly Button _btnSplit = new Button();
         // 11-10 用户指令：「分类打包」紧挨「图号分离」右侧
         private readonly Button _btnPackage = new Button();
+        // 2026-11-15 用户指令：「工程图附加二维码」紧挨「分类打包」右侧（参考 caxa3dqrcode 独立插件）
+        private readonly Button _btnQr = new Button();
         private readonly Button _btnTop = new Button();
         private readonly Button _btnRefreshTable = new Button();
         private readonly Button _btnSelectTable = new Button();
@@ -109,9 +111,13 @@ namespace caxa3dBatchMaster
             // 同时去掉「CAXA 3D 已连接 (29.0)」状态字样（内置插件无需显示连接关系），状态标签隐藏后腾出 160px。
             _btnSplit.SetBounds(636, 8, 88, 28); _btnSplit.Text = "图号分离";
             _btnPackage.SetBounds(730, 8, 88, 28); _btnPackage.Text = "分类打包";
-            _btnTop.SetBounds(946, 8, 88, 28); _btnTop.Text = "窗口前置"; _btnTop.BackColor = Color.LightSkyBlue;
-            _lblStatus.SetBounds(1040, 12, 68, 22); _lblStatus.Text = ""; _lblStatus.Visible = false;
-            _btnStop.SetBounds(1114, 8, 92, 28); _btnStop.Text = "停止"; _btnStop.BackColor = Color.MistyRose; _btnStop.Enabled = false;
+            // 11-15 用户指令：「工程图附加二维码」紧挨「分类打包」右侧（参考 caxa3dqrcode 独立插件）
+            // 11-15 修正（截图实证显示不全）：8 个汉字在 88px 里会折成两行被 28px 高度裁掉，
+            // 二维码按钮加宽到 120px（8×12+内边距），其后「窗口前置/停止」整体右移一档。
+            _btnQr.SetBounds(824, 8, 120, 28); _btnQr.Text = "工程图附加二维码";
+            _btnTop.SetBounds(952, 8, 88, 28); _btnTop.Text = "窗口前置"; _btnTop.BackColor = Color.LightSkyBlue;
+            _lblStatus.SetBounds(1048, 12, 68, 22); _lblStatus.Text = ""; _lblStatus.Visible = false;
+            _btnStop.SetBounds(1136, 8, 92, 28); _btnStop.Text = "停止"; _btnStop.BackColor = Color.MistyRose; _btnStop.Enabled = false;
             _lblStatus.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             _btnStop.Anchor = AnchorStyles.Top | AnchorStyles.Right;
 
@@ -158,7 +164,7 @@ namespace caxa3dBatchMaster
 
             Controls.AddRange(new Control[] {
                 _btnImportAssembly, _btnRename, _btnReadProps, _btnWriteProps,
-                _btnClear, _btnRefreshDrw, _btnSplit, _btnPackage, _btnTop, _btnStop, _btnLog,
+                _btnClear, _btnRefreshDrw, _btnSplit, _btnPackage, _btnQr, _btnTop, _btnStop, _btnLog,
                 _txtTablePath, _btnRefreshTable, _btnSelectTable, _btnLocateTable, _lblInfo,
                 _chkDeclineUpdate3d,
                 _dgv });
@@ -182,6 +188,7 @@ namespace caxa3dBatchMaster
             _btnRefreshDrw.Click += BtnRefreshDrw_Click;
             _btnSplit.Click += BtnSplit_Click;
             _btnPackage.Click += BtnPackage_Click;
+            _btnQr.Click += BtnQr_Click;
             _btnTop.Click += BtnTop_Click;
             _btnRefreshTable.Click += BtnRefreshTable_Click;
             _btnSelectTable.Click += BtnSelectTable_Click;
@@ -601,6 +608,16 @@ namespace caxa3dBatchMaster
         {
             TopMost = !TopMost;
             _btnTop.BackColor = TopMost ? Color.LightSkyBlue : SystemColors.Control;
+        }
+
+        /// <summary>「工程图附加二维码」（11-15 用户指令，参考 caxa3dqrcode）：弹窗里点「确定」后，
+        /// 对表格零件名非空的行逐行取属性组合 → 制作二维码 → 打开该行同名 exb → 比例补偿落图 → 保存。</summary>
+        private void BtnQr_Click(object sender, EventArgs e)
+        {
+            using (var dlg = new PopupQrCode(_dgv, _svc, AppendLog))
+            {
+                dlg.ShowDialog(this);
+            }
         }
 
         // ---------------------------------------------------------------- 单元格三色状态（用户指令 3）

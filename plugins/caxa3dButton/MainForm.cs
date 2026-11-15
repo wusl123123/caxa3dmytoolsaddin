@@ -27,10 +27,6 @@ namespace caxa3dButton
     [System.Runtime.InteropServices.ComVisible(false)]
     internal sealed class MainForm : Form
     {
-        // 进程级互斥：同一 CAXA 进程内只允许一条长流程；FormClosing 置停
-        private static volatile bool _running;
-        private static volatile bool _stopRequested;
-
         internal static readonly string AppTitleBase = "按钮工具";
 
         private readonly IZBaseApp _siteApp;
@@ -133,7 +129,6 @@ namespace caxa3dButton
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
-            _stopRequested = true;
             ChordRescue.Uninstall(this, "工具窗关闭");
             // 小工具收尾（caxa3dminitool 口径）：关窗即置停止标志，不强行保存文件、不强关图纸
             _kernelStopRequested = true;

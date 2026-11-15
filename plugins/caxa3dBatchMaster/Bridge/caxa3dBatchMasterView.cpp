@@ -1,4 +1,4 @@
-﻿//=====================================================================
+﻿﻿//=====================================================================
 // caxa3dBatchMasterView.cpp — caxa3dBatchMaster「刷新工程图」桥接型 CRX
 // （CAXA 3D 2027 图纸环境 CAXADraft，IronCAD.exe 进程内）
 //
@@ -52,6 +52,11 @@
 //   OPEN_EXB     confirm=是 token=是   —— 图纸环境侧打开/激活 exb（A 文档管理器 /
 //                B 键入 CX_open_Impl / C 原生命令三通道，判成功只认文档在册）；
 //                业务 exb 打开的唯一入口，替代 Scene 侧 OpenFile2 退役路线。
+//   GETSCALE     confirm=否 token=否   —— 当前图纸比例+图幅宽高（PaperTable），二维码比例补偿用。
+//   BITMAP_NATIVE confirm=是 token=是  —— 投宿主 CX_DFT_InsertBitmap 插图（回包先落盘再投命令）。
+//   QR_STATE     confirm=否 token=否   —— 模型空间实体计数增量，delta>0 = 插图成功唯一权威判据。
+//   LISTENTS     confirm=否 token=否   —— 只读 dump 模型空间类名分布 + imageRef 计数。
+//   DELETE_QR    confirm=是 token=是   —— arg="x,y"：按图片实体包围盒精确删除目标点上的旧二维码。
 //   · 三道拒绝闸（未知 action / 令牌不符 / 缺 confirm）各自 ERR 回包 + 一行 bridge: 日志。
 //
 // ── 会话令牌 ────────────────────────────────────────────────────────
@@ -87,6 +92,10 @@
 #include "crxdb.h"
 #include "crxstrc.h"       // CDraft::eOk
 #include "crxChar.h"       // CxCHAR
+#include "dbapserv.h"      // crxdbHostApplicationServices（QR_STATE/GETSCALE 用，2026-11-15 移植自 caxa3dqrcode_bridge）
+#include "dbsymtb.h"       // CRxDbBlockTable / CRxDbPaperTable（模型空间计数 / 图纸比例；安装目录头为准）
+#include "dbents.h"
+#include "dbImageRef.h"    // CRxDbImageRef（图片实体）：LISTENTS/DELETE_QR 按类判定的依据（caxa3dqrcode 11-15 实机坐实）
 
 AC_IMPLEMENT_EXTENSION_MODULE(Caxa3dBatchMasterViewDLL)
 
@@ -152,6 +161,13 @@ struct CloseJob
     ULONGLONG     deadline  = 0;     // GetTickCount64() 期限
 };
 static CloseJob g_job;
+
+// 「工程图附加二维码」（2026-11-15 移植自 caxa3dqrcode_bridge，11-15 实机整链 verified）：
+// BITMAP_NATIVE 投宿主 CX_DFT_InsertBitmap 让 CAXA 自己插图，实体由宿主命令收养，
+// 所以 QR_STATE 的 modelSpace 计数增量是权威判据（自绘等宽线 = 假成功，caxa3dqrcode 19:11 实机已判死）。
+static bool              g_qrNativeMode = false;
+static volatile LONG     g_qrPending = 0;
+static int               g_qrBefore = -1, g_qrAfter = -1, g_qrDelta = -1;
 
 //---------------------------------------------------------------------
 // 日志：%TEMP%\caxa3dbatchmaster_view_crx.log（追加写、共享读）
@@ -794,6 +810,318 @@ static void DoExecNative(int seq, const std::wstring& arg)
 }
 
 //---------------------------------------------------------------------
+// 「工程图附加二维码」三命令（2026-11-15 移植自 caxa3dqrcode_bridge.cpp，
+// 11-15 实机整链 verified：GETSCALE → 文件框代填 → 图像框代填 → delta=1 → SAVE）。
+//   GETSCALE      —— 读当前图纸 PaperTable.CurrentPaper 的 getPaperScale/getPaperSize
+//                    （比例 + 图幅物理宽高 mm），C# 侧按分母做比例补偿与定位规则换算。
+//   BITMAP_NATIVE —— 投宿主 CX_DFT_InsertBitmap（Commands.xml:2318 实证 Identify），
+//                    回包 OK 只代表已投出；先回包再 sendStringToExecute（对话框占住
+//                    UI 线程时 BridgeTick 不返回，C# 必须先拿到回包才进后台代点）。
+//   QR_STATE      —— 实时重数模型空间实体（native 模式），delta>0 = 唯一权威成功判据。
+//   LISTENTS      —— 只读 dump 模型空间类名分布 + imageRef 计数（先删后附的判定取证）。
+//   DELETE_QR     —— arg="x,y"：按图片实体包围盒命中目标点 ±1mm 精确删除旧二维码
+//                    （两趟纪律：先只读收集 entityId，再 kForWrite open → erase）。
+//   头文件取证：dbsymtb.h(1718/1745) 小写 CurrentPaper()/getPaperScale/getPaperSize
+//   与 lib 符号一致；C:\code\ICAPI\CRX\Inc\dbPaper.h 是旧文档，不能作编译依据。
+//---------------------------------------------------------------------
+static int CountModelSpaceEntities()
+{
+    CRxDbDatabase* pDb = crxdbHostApplicationServices()
+                       ? crxdbHostApplicationServices()->workingDatabase() : NULL;
+    if (!pDb) return -1;
+    CRxDbBlockTable* pTable = NULL;
+    if (pDb->getSymbolTable(pTable, CRxDb::kForRead) != CDraft::eOk || !pTable) return -1;
+    CRxDbBlockTableRecord* pRec = NULL;
+    CDraft::ErrorStatus es = pTable->getAt(CRXDB_MODEL_SPACE, pRec, CRxDb::kForRead);
+    pTable->close();
+    if (es != CDraft::eOk || !pRec) return -1;
+    CRxDbBlockTableRecordIterator* pItr = NULL;
+    if (pRec->newIterator(pItr, true) != CDraft::eOk || !pItr) { pRec->close(); return -1; }
+    int n = 0;
+    for (; !pItr->done(); pItr->step()) ++n;
+    delete pItr;
+    pRec->close();
+    return n;
+}
+
+static void DoGetScale(int seq, const std::wstring& /*arg*/)
+{
+    CRxDbDatabase* pDb = crxdbHostApplicationServices()
+                       ? crxdbHostApplicationServices()->workingDatabase() : NULL;
+    if (!pDb) { WriteResp(seq, L"GETSCALE", L"ERR", L"no-working-db（图纸文档未就绪）"); return; }
+    CRxDbPaperTable* pPaper = NULL;
+    if (pDb->getPaperTable(pPaper, CRxDb::kForRead) != CDraft::eOk || !pPaper)
+    { WriteResp(seq, L"GETSCALE", L"ERR", L"paper-table-not-openable"); return; }
+    int n = pPaper->getPaperCount();
+    CRxDbPaperTableRecord* pRec = pPaper->CurrentPaper();
+    double d = 0.0;
+    double pw = 0.0, ph = 0.0;   // 图幅物理宽高（mm），供 C# 匹配「A3横」等定位规则
+    if (pRec)
+    {
+        pRec->getPaperScale(d);
+        pRec->getPaperSize(pw, ph);
+    }
+    pPaper->close();   // 与 CountModelSpaceEntities 的 BlockTable 同纪律
+    wchar_t buf[64], bw[64], bh[64];
+    swprintf(buf, 64, L"%.6g", d);
+    swprintf(bw, 64, L"%.6g", pw);
+    swprintf(bh, 64, L"%.6g", ph);
+    if (d > 1e-9)
+        WriteResp(seq, L"GETSCALE", L"OK",
+            std::wstring(L"scale=") + buf +
+            L"|papers=" + std::to_wstring(n) +
+            L"|w=" + bw + L"|h=" + bh +
+            L"|authority=PaperTable.CurrentPaper.getPaperScale.getPaperSize");
+    else
+        WriteResp(seq, L"GETSCALE", L"ERR",
+            std::wstring(L"paper-scale-invalid: raw=") + buf +
+            L"|papers=" + std::to_wstring(n) + L"（读不到=第三态，不折算）");
+}
+
+//---------------------------------------------------------------------
+// LISTENTS（移植自 caxa3dqrcode_bridge 11-15：「插入位置已有二维码要先删再附」）
+//   只读取证：枚举模型空间每实体 isA()->name()（CxCHAR=wchar_t 零转码），统计类名分布
+//   + 按 CRxDbImageRef::desc() isKindOf 复核（dbImageRef.h，图片实体）。
+//   绝不写库、不 erase、不投命令；读不到实体如实回报（第三态）。
+//---------------------------------------------------------------------
+static void DoListEnts(int seq, const std::wstring& /*arg*/)
+{
+    CRxDbDatabase* pDb = crxdbHostApplicationServices()
+                       ? crxdbHostApplicationServices()->workingDatabase() : NULL;
+    if (!pDb) { WriteResp(seq, L"LISTENTS", L"ERR", L"no-working-db（图纸文档未就绪）"); return; }
+    CRxDbBlockTable* pTable = NULL;
+    if (pDb->getSymbolTable(pTable, CRxDb::kForRead) != CDraft::eOk || !pTable)
+    { WriteResp(seq, L"LISTENTS", L"ERR", L"block-table-not-openable"); return; }
+    CRxDbBlockTableRecord* pRec = NULL;
+    CDraft::ErrorStatus es = pTable->getAt(CRXDB_MODEL_SPACE, pRec, CRxDb::kForRead);
+    pTable->close();
+    if (es != CDraft::eOk || !pRec)
+    { WriteResp(seq, L"LISTENTS", L"ERR", L"model-space-not-openable"); return; }
+    CRxDbBlockTableRecordIterator* pItr = NULL;
+    if (pRec->newIterator(pItr, true) != CDraft::eOk || !pItr)
+    { pRec->close(); WriteResp(seq, L"LISTENTS", L"ERR", L"iterator-failed"); return; }
+
+    int total = 0, openFail = 0, imgRef = 0;
+    std::vector<std::pair<std::wstring, int> > tally;   // 类名 x 计数（种类有限，线性查找）
+    const CRxClass* pImgDesc = CRxDbImageRef::desc();   // rxInit 未跑时可能为 NULL，下面判空
+    for (; !pItr->done(); pItr->step())
+    {
+        ++total;
+        CRxDbEntity* pEnt = NULL;
+        if (pItr->getEntity(pEnt, CRxDb::kForRead, false) != CDraft::eOk || !pEnt) { ++openFail; continue; }
+        std::wstring cls = L"<null>";
+        if (pEnt->isA() && pEnt->isA()->name()) cls = pEnt->isA()->name();
+        if (pImgDesc && pEnt->isKindOf(pImgDesc)) ++imgRef;
+        bool found = false;
+        for (size_t i = 0; i < tally.size(); ++i)
+            if (tally[i].first == cls) { ++tally[i].second; found = true; break; }
+        if (!found) tally.push_back(std::make_pair(cls, 1));
+        pEnt->close();   // 读模式 open 后必须 close（与 CountModelSpaceEntities 同纪律）
+    }
+    delete pItr;
+    pRec->close();
+
+    std::wstring ents;
+    for (size_t i = 0; i < tally.size(); ++i)
+    {
+        if (i) ents += L"; ";
+        ents += tally[i].first + L" x" + std::to_wstring(tally[i].second);
+    }
+    std::wstring msg = L"total=" + std::to_wstring(total) +
+                       L"|openFail=" + std::to_wstring(openFail) +
+                       L"|imageRef=" + std::to_wstring(imgRef) +
+                       L"|descReady=" + (pImgDesc ? L"1" : L"0") +
+                       L"|ents=" + ents;
+    Log("listents: %hs", W2U8(msg).c_str());
+    WriteResp(seq, L"LISTENTS", L"OK", msg);
+}
+
+//---------------------------------------------------------------------
+// DELETE_QR（移植自 caxa3dqrcode_bridge 11-15：「能够直接识别放置点上的图片,选中删除么」
+//   → 可行、已实机验证）：arg="x,y"（图纸坐标系目标插入点，C# 由定位规则/兜底值算出）。
+//   两趟纪律：第一趟只读（kForRead + getGeomExtents 判命中，收集 entityId），
+//   第二趟 kForWrite open → erase(true)。绝不先删后看、不盲删。
+//   命中判定：目标点 ±1mm 扩边落在实体包围盒内（插入点 = 图片锚点，通常即包围盒左下角）。
+//   getGeomExtents 是 CRxDbEntity 基类虚函数（dbmain.h:462），CRxDbImageRef 空壳类不影响；
+//   CRxDbExtents::minPoint/maxPoint（dbmain.h:120/121）→ CRxGePoint3d public x/y。
+//   deleted=0 = 正常首插不算错；extents 读不到 = 跳过不盲删（如实回报）。
+//   ★ 坑 45：erase() 返回值不可信（回 err 但实体实际已删）——本回包只作取证，
+//     C# 侧不拿 deleted/eraseFail 做成功判据，成败仍由 QR_STATE delta + SAVE 裁定。
+//---------------------------------------------------------------------
+static void DoDeleteQr(int seq, const std::wstring& arg)
+{
+    double tx = 0.0, ty = 0.0;
+    {
+        size_t c = arg.find(L',');
+        if (c == std::wstring::npos)
+        { WriteResp(seq, L"DELETE_QR", L"ERR", L"bad-arg: need \"x,y\""); return; }
+        tx = _wtof(arg.substr(0, c).c_str());
+        ty = _wtof(arg.substr(c + 1).c_str());
+    }
+    const double kTol = 1.0;   // mm 容差（扩边）
+
+    CRxDbDatabase* pDb = crxdbHostApplicationServices()
+                       ? crxdbHostApplicationServices()->workingDatabase() : NULL;
+    if (!pDb) { WriteResp(seq, L"DELETE_QR", L"ERR", L"no-working-db（图纸文档未就绪）"); return; }
+    CRxDbBlockTable* pTable = NULL;
+    if (pDb->getSymbolTable(pTable, CRxDb::kForRead) != CDraft::eOk || !pTable)
+    { WriteResp(seq, L"DELETE_QR", L"ERR", L"block-table-not-openable"); return; }
+    CRxDbBlockTableRecord* pRec = NULL;
+    CDraft::ErrorStatus es = pTable->getAt(CRXDB_MODEL_SPACE, pRec, CRxDb::kForRead);
+    pTable->close();
+    if (es != CDraft::eOk || !pRec)
+    { WriteResp(seq, L"DELETE_QR", L"ERR", L"model-space-not-openable"); return; }
+    CRxDbBlockTableRecordIterator* pItr = NULL;
+    if (pRec->newIterator(pItr, true) != CDraft::eOk || !pItr)
+    { pRec->close(); WriteResp(seq, L"DELETE_QR", L"ERR", L"iterator-failed"); return; }
+
+    const CRxClass* pImgDesc = CRxDbImageRef::desc();
+    std::vector<CRxDbObjectId> hits;
+    int imgRef = 0, extentsFail = 0;
+    std::wstring detail;
+    for (; !pItr->done(); pItr->step())
+    {
+        CRxDbEntity* pEnt = NULL;
+        if (pItr->getEntity(pEnt, CRxDb::kForRead, false) != CDraft::eOk || !pEnt) continue;
+        if (pImgDesc && pEnt->isKindOf(pImgDesc))
+        {
+            ++imgRef;
+            CRxDbExtents ext;
+            CDraft::ErrorStatus es2 = pEnt->getGeomExtents(ext);
+            bool hit = false;
+            if (es2 == CDraft::eOk)
+            {
+                CRxGePoint3d mn = ext.minPoint(), mx = ext.maxPoint();
+                Log("delete_qr: image min=(%.3f,%.3f) max=(%.3f,%.3f) target=(%.3f,%.3f)",
+                    mn.x, mn.y, mx.x, mx.y, tx, ty);
+                if (mx.x >= mn.x && mx.y >= mn.y &&
+                    tx >= mn.x - kTol && tx <= mx.x + kTol &&
+                    ty >= mn.y - kTol && ty <= mx.y + kTol)
+                    hit = true;
+            }
+            else ++extentsFail;
+            if (hit)
+            {
+                CRxDbObjectId id;
+                if (pItr->getEntityId(id) == CDraft::eOk) hits.push_back(id);
+                if (detail.size()) detail += L"; ";
+                detail += L"id@" + std::to_wstring(hits.size());
+            }
+        }
+        pEnt->close();   // 与 DoListEnts 同纪律：读模式 open 后必须 close
+    }
+    delete pItr;
+    pRec->close();
+
+    int deleted = 0, eraseFail = 0, openErr = 0, eraseErr = 0;
+    for (size_t i = 0; i < hits.size(); ++i)
+    {
+        CRxDbEntity* pEnt = NULL;
+        CDraft::ErrorStatus esOpen = crxdbOpenCRxDbEntity(pEnt, hits[i], CRxDb::kForWrite);
+        if (esOpen != CDraft::eOk || !pEnt)
+        {
+            ++eraseFail; ++openErr;
+            Log("delete_qr: erase open-for-write FAILED err=%d（0=成功以外的错误码取证）", (int)esOpen);
+            continue;
+        }
+        CDraft::ErrorStatus esE = pEnt->erase(true);
+        if (esE == CDraft::eOk) ++deleted;
+        else
+        {
+            ++eraseFail; ++eraseErr;
+            Log("delete_qr: erase FAILED err=%d（锁定层/只读/句柄态取证）", (int)esE);
+        }
+        pEnt->close();
+    }
+    Log("delete_qr: target=(%.3f,%.3f) imageRef=%d extentsFail=%d deleted=%d eraseFail=%d openErr=%d eraseErr=%d",
+        tx, ty, imgRef, extentsFail, deleted, eraseFail, openErr, eraseErr);
+
+    WriteResp(seq, L"DELETE_QR", L"OK",
+        L"deleted=" + std::to_wstring(deleted) +
+        L"|imageRef=" + std::to_wstring(imgRef) +
+        L"|extentsFail=" + std::to_wstring(extentsFail) +
+        L"|eraseFail=" + std::to_wstring(eraseFail) +
+        L"|openErr=" + std::to_wstring(openErr) +
+        L"|eraseErr=" + std::to_wstring(eraseErr) +
+        L"|target=" + arg +
+        L"|authority=geomExtentsContainment" + (detail.size() ? L"|hit=" + detail : L""));
+}
+
+static void DoQrState(int seq, const std::wstring& /*arg*/)
+{
+    // native 模式：实体由宿主命令异步生成，QR_STATE 必须实时重数，不能只读缓存。
+    {
+        int now = CountModelSpaceEntities();
+        if (now >= 0)
+        {
+            g_qrAfter = now;
+            g_qrDelta = (g_qrBefore >= 0) ? (now - g_qrBefore) : -1;
+        }
+        if (g_qrDelta > 0) InterlockedExchange(&g_qrPending, 0);
+    }
+    std::wstring msg = L"mode=" + std::wstring(g_qrNativeMode ? L"native" : L"legacy") +
+                       L" before=" + std::to_wstring(g_qrBefore) +
+                       L" after=" + std::to_wstring(g_qrAfter) +
+                       L" delta=" + std::to_wstring(g_qrDelta) +
+                       L" pending=" + std::to_wstring((long)InterlockedCompareExchange(&g_qrPending, 0, 0));
+    WriteResp(seq, L"QR_STATE", L"OK", msg);
+}
+
+/// <summary>在 RegCmds 表里挑宿主命令名；查不到也按 Commands.xml 全名投（宿主命令不是自注册空条目）。</summary>
+static const wchar_t* PickHostCmd(const wchar_t* const* cands, int n, const wchar_t* fallback, const char* tag)
+{
+    CRxEdCommandStack* pStack = crxedRegCmds;
+    if (pStack)
+        for (int i = 0; i < n; ++i)
+        {
+            CRxEdCommand* p = pStack->lookupCmd(cands[i], true, true, false);
+            if (p) { Log("%s: native cmd lookup HIT %ls", tag, cands[i]); return cands[i]; }
+        }
+    Log("%s: native cmd lookup MISS（宿主命令不在 RegCmds 表，按 Commands.xml 全名投递）", tag);
+    return fallback;
+}
+
+static void NativeDispatch(int seq, const wchar_t* action, const wchar_t* const* cands, int nCands,
+                           const wchar_t* fallback, const char* tag)
+{
+    if (!crxDocManager || !crxDocManager->mdiActiveDocument())
+    {
+        WriteResp(seq, action, L"ERR", L"no-active-drawing-doc（未投递）");
+        return;
+    }
+    int before = CountModelSpaceEntities();
+    if (before < 0)
+    {
+        WriteResp(seq, action, L"ERR", L"db-not-ready（模型空间不可枚举，未投递）");
+        return;
+    }
+    const wchar_t* cmd = PickHostCmd(cands, nCands, fallback, tag);
+    g_qrBefore = before; g_qrAfter = before; g_qrDelta = 0;
+    g_qrNativeMode = true;
+    InterlockedExchange(&g_qrPending, 1);
+
+    // 回包必须先落盘：sendStringToExecute 会弹「插入图片」文件框并占住 UI 线程，
+    // BridgeTick 在对话框关闭前不会返回；C# 只有先拿到回包才会进后台代点等待。
+    WriteResp(seq, action, L"OK",
+        L"mode=native|cmd=" + std::wstring(cmd) + L"|before=" + std::to_wstring(before) +
+        L"|check=QR_STATE|authority=modelSpaceCountDelta");
+    Log("qr: native dispatched cmd=%ls before=%d（等 C# 后台线程代点宿主对话框）", cmd, before);
+
+    std::wstring full = std::wstring(cmd) + L" ";
+    CDraft::ErrorStatus es = crxDocManager->sendStringToExecute(
+        crxDocManager->mdiActiveDocument(), full.c_str(), true, false, true);
+    Log("qr: native sendStringToExecute es=%d", (int)es);
+    if (es != CDraft::eOk)
+        Log("qr: native send es!=eOk（可能 unknownCommand，看 _crx.log 前后是否真弹过目标对话框）");
+}
+
+static void DoBitmapNative(int seq, const std::wstring& /*arg*/)
+{
+    const wchar_t* cands[] = { L"CX_DFT_InsertBitmap", L"InsertBitmap" };
+    NativeDispatch(seq, L"BITMAP_NATIVE", cands, 2, L"CX_DFT_InsertBitmap", "bmp");
+}
+
+//---------------------------------------------------------------------
 // 命令表：C# 只能激活表内 verb；表外一律 ERR。needsConfirm/needsToken 语义照抄样板。
 //---------------------------------------------------------------------
 typedef void (*CmdHandler)(int seq, const std::wstring& arg);
@@ -1197,6 +1525,12 @@ static const CmdEntry kCmdTable[] =
                                             L"图纸环境内把目标 exb 经 TDExportControl.Export 转 dxf/dwg/pdf（arg=exb路径|输出路径|eZExportDrawingType；无 UI；★ 2027 实机 GetIDispatch 恒 NULL 已判死，仅留作规则总纲 29④ 拍板候选通道）" },
     { L"OPEN_EXB",    true,  true,  DoOpenExb,
                                             L"图纸环境侧打开/激活 exb（arg=exb全路径；A 文档管理器/B 键入 CX_open_Impl/C 原生命令三通道；替代 Scene 侧 OpenFile2 对业务 exb 的退役路线）" },
+    { L"GETSCALE",    false, false, DoGetScale,   L"读当前图纸比例与图幅宽高（PaperTable.CurrentPaper），供二维码比例补偿/定位规则" },
+    { L"BITMAP_NATIVE", true, true,  DoBitmapNative,
+                                            L"投宿主 CX_DFT_InsertBitmap 插图（回包先落盘再投出；判据=QR_STATE delta）" },
+    { L"QR_STATE",    false, false, DoQrState,    L"模型空间实体计数增量（BITMAP_NATIVE 后 delta>0 = 插图成功唯一权威判据）" },
+    { L"LISTENTS",    false, false, DoListEnts,   L"只读 dump 模型空间类名分布 + imageRef 计数（先删后附判定取证）" },
+    { L"DELETE_QR",   true,  true,  DoDeleteQr,   L"arg=\"x,y\"：按图片实体包围盒命中目标点 ±1mm 精确删除旧二维码（先只读收集再 erase）" },
 };
 
 static const CmdEntry* FindCmd(const std::wstring& action)
@@ -1303,7 +1637,7 @@ static void BridgeTick()
     {
         WriteResp(seq, action, L"ERR",
                   L"CRX 不认可该命令：" + action +
-                  L"（可用：PING / CLOSEDOC / CLOSERAW / SAVE / EXEC_NATIVE / TITLEBLOCK_3DSET / TB_ABORT / CONVERT_DXF / OPEN_EXB）");
+                  L"（可用：PING / CLOSEDOC / CLOSERAW / SAVE / EXEC_NATIVE / TITLEBLOCK_3DSET / TB_ABORT / CONVERT_DXF / OPEN_EXB / GETSCALE / BITMAP_NATIVE / QR_STATE / LISTENTS / DELETE_QR）");
         Log("bridge: 未知/未登记命令「%hs」，已拒绝", W2U8(action).c_str());
         g_inTick = false;
         return;

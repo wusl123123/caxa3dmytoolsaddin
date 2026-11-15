@@ -138,15 +138,6 @@ namespace caxa3dButton
         public static volatile string Locate3dAfterPrompt;
 
         /// <summary>
-        /// 改名时 CAXA 自弹的「你是否要修改和保存这个外链文件的文件名?」，置了本标志就改点「取消」。
-        /// 为什么（实机 11-02 14:49:58 带约束件「SC08020102.01-52 板」）：「带图独立」第一步已经把
-        /// 外链换成 零件B.ics，元素名一改，CAXA 仍去按老路径 零件A.ics 改名保存 ⇒
-        /// 「保存文档失败 … 原因: 发生共享冲突」⇒ 整个改名事务回滚（14:50:20 之后的「零部件重新生成」
-        /// 里元素名还是旧名）。点「确定」等于让 CAXA 做一件它做不成、还会把改名带倒的事。
-        /// </summary>
-        public static volatile bool DeclineLinkFileRename;
-
-        /// <summary>
         /// 「更新工程图链接文件-V1.1」的拒绝模式标志：置了本标志，打开 exb 弹出的「请更新3D文件位置」
         /// 就改点「否」（链接保持陈旧），改由后续的「改变链接文件」对话框(代点法)单独修链 —— 即 V1.1 默认修复路径。
         /// 不置（保底）：本引擎点「是」+文件框布防，链接在打开期就被修好。
@@ -164,9 +155,6 @@ namespace caxa3dButton
         }
 
         public static void ResetSaveFailure() { LastSaveFailure = null; }
-
-        /// <summary>挂起图纸进程（CAXADraft）的代点：本进程弹窗照常点，只暂停对图纸进程的处理。</summary>
-        public static volatile bool Suspend;
 
         /// <summary>代点引擎当前是否在跑。<b>只读</b> —— 开启只能走 <see cref="Borrow(string)"/>。</summary>
         public static bool Enabled { get { return _enabled; } }
@@ -542,8 +530,6 @@ namespace caxa3dButton
                 if (IsExcludedTitle(title)) return true;
                 // 收尾巡检期只盯业务框，其余一概不碰
                 if (tailOnly && !IsTailTitle(title)) return true;
-                // 挂起期（图纸已打开、.ics 流程未完成）：图纸进程的弹窗留到后续阶段统一处理
-                if (Suspend && wpid != selfPid) return true;
 
                 _modalCountLocal++;
                 dialogs.Add(h);
@@ -688,20 +674,6 @@ namespace caxa3dButton
                         LastSaveFailure = JoinBody(staticTexts);
                         Diagnostics.Log("PopupAutoYes: 记下 CAXA 自报保存失败 @「" + title + "」" +
                                         BodySuffix(staticTexts));
-                    }
-
-                    // 「是否要修改和保存这个外链文件的文件名?」：改名流程已经把外链换成了新名文件，
-                    // CAXA 再去动那个名字必然撞共享冲突并把改名一起回滚 ⇒ 这一张要点「取消」。
-                    if (DeclineLinkFileRename && cancelBtn != IntPtr.Zero &&
-                        BodyHas(staticTexts, "是否要修改和保存这个外链文件"))
-                    {
-                        Diagnostics.Log("PopupAutoYes: 取消「修改并保存外链文件名」（" + title +
-                                        "）—— 外链文件名已由流程落到新名，让 CAXA 再改一次会撞共享冲突" +
-                                        BodySuffix(staticTexts));
-                        PostMessage(cancelBtn, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
-                        Interlocked.Increment(ref _clickCount);
-                        _clickedOnce.Add(dlgKey);
-                        continue;
                     }
 
                     // 「请更新3D文件位置」：点是之后 CAXA 立刻弹「打开」要人指新 ics，

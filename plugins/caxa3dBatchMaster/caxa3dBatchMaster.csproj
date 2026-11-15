@@ -41,17 +41,25 @@
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Drawing" />
+    <!-- QRCoder 1.6.0 net40 程序集（2026-11-15 「工程图附加二维码」随包，net48 直接引用；CAXA bin 无同名 DLL，无冲突） -->
+    <Reference Include="QRCoder">
+      <HintPath>Lib\QRCoder.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="interop.ICApiIronCAD">
       <HintPath>Lib\interop.ICApiIronCAD.dll</HintPath>
       <EmbedInteropTypes>True</EmbedInteropTypes>
     </Reference>
   </ItemGroup>
 
-  <!-- 运行期资源：默认属性表格 + 两张用户可编辑规则文件 + 图纸环境 CRX 桥 + 预热图纸 -->
+  <!-- 运行期资源：默认属性表格 + 两张用户可编辑规则文件 + 图纸环境 CRX 桥 -->
   <ItemGroup>
     <None Update="caxa3dBatchMaster属性表格.xlsx" CopyToOutputDirectory="PreserveNewest" />
     <None Update="caxa3dBatchMaster内部字段映射.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="caxa3dBatchMaster图号分离规则.txt" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 工程图附加二维码：定位规则按图幅匹配坐标，坐标×图纸比例分母=实际 mm -->
+    <None Update="caxa3dBatchMaster二维码定位规则.txt" CopyToOutputDirectory="PreserveNewest" />
     <!-- 图纸环境 CRX 桥（源码在 Bridge\，产物由 msbuild 工程编译；部署时按第 5 登记点投放到 CAXADraft\bin） -->
     <None Update="Bridge\bin\caxa3dBatchMasterView.crx" Link="caxa3dBatchMasterView.crx"
           CopyToOutputDirectory="PreserveNewest" />
