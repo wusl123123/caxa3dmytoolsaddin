@@ -865,10 +865,10 @@ foreach ($v in $versions) {
     if (-not $copyOk) { $hadError = $true; continue }
     Write-Host "[2/5] 主程序 / 契约 / 预热载体已拷贝到 $caxaBin"
 
-    # ★ 2026-11-14：CAXA 环境配置包（2024环境配置.ucex / 2027环境配置.ucex）只随交付件走、
+    # ★ 2026-11-14：CAXA 环境配置包（2027环境配置.ucex，2024 版自 2026-11-16 起不再打包）只随交付件走、
     # 安装脚本不处理。理由：CAXA 自带的环境配置导入走用户显式的「工具 → 环境配置 → 导入」
     # 菜单，命令行/注册表层面没有入口，也不应由集合体干预 CAXA 自带功能的安装时机；
-    # 两者文件与 warmExb 同级放在交付件根目录，用户自行加载即可。
+    # 文件与 warmExb 同级放在交付件根目录，用户自行加载即可。
 
     # pdb 只是调试符号，拷不上不影响运行
     if ($pdbPath -and (Test-Path $pdbPath)) {

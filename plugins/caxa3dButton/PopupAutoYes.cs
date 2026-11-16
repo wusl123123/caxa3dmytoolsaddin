@@ -1,4 +1,4 @@
-﻿// 机械移植自工程 caxa3ddiffrename 的 PopupAutoYes.cs（全文件）。仅改 namespace，逻辑未动。
+﻿﻿// 机械移植自工程 caxa3ddiffrename 的 PopupAutoYes.cs（全文件）。仅改 namespace，逻辑未动。
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;

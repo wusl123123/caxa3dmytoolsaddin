@@ -96,48 +96,59 @@ namespace caxa3dBatchMaster
             log(Tag + ": 风险提示：业务 exb 自动 OpenFile2 有 dataexchange.dll AV 闪退记录（技能 06 第 11 节，热态不消除）；沿用 caxa3dqrcode 用户定案执行，失败即判死、不重试");
 
             // 热路径：投递前先泵消息，别把主线程逼到最坏时机（技能 06 第 11 节②）
-            if (!PumpMessages(1500, stop)) { r.Summary = "用户停止"; return r; }
-
-            // 3) 打开该行 exb：返回值/异常都是固定噪音，以窗口真现 + CRX marker 为权威
-            bool alreadyOpen = false;
-            try { app.OpenFile2(exbPath, false, true, out alreadyOpen); }
-            catch (Exception ex) { log(Tag + ": OpenFile2 异常（exb 固定噪音，吞掉）" + ex.Message); }
-            log(Tag + ": OpenFile2 已投递 " + exbPath + "（alreadyOpen=" + alreadyOpen + "，仅代表入队，不算成功）");
-
-            // 4) 定窗名：优先句柄差集；同名 exb 原本已打开（无新窗口）时按 MDI 活动图纸视图接管
+            // ★ 开图期弹窗代点（参考「刷新工程图」FormatConverter/BatchProcessor 同款 PopupAutoYes）：
+            //   OpenFile2 前布防、稳定闸过/败后 finally 撤防。开图纸阶段可能弹的框全部兜住：
+            //   8D 视图更新→是、尺寸检查→取消（不重建失效尺寸）、其余带「是/确定」的 #32770→代点。
+            //   与 NativeQrDialog 白名单守护并存（答案一致＝双保险）；字段映射/文件框等专用链路
+            //   均不在本段。必须在 NativeBitmapInsert.Start 之前撤防：插入段「图像」参数框由专用
+            //   填写器先填插入点/比例再点「确定」，通用代点器抢点会把没填参数的空框提交掉。
+            PopupAutoYes.Arm(log);
             IntPtr hwnd = IntPtr.Zero;
-            string winWhy;
-            if (!WaitForNewDrawingWindow(baseline, 8000, log, stop, out hwnd, out winWhy))
+            string winWhy = "";
+            try
             {
-                // exb 上一轮已打开时 OpenFile2 不再产生新窗口，差集白等；
-                // 一律回退到 MDI 活动图纸视图，并如实标注「身份未独立确认」第三态。
-                IntPtr act = FindActiveDraftView();
-                if (act != IntPtr.Zero)
+                if (!PumpMessages(1500, stop)) { r.Summary = "用户停止"; return r; }
+
+                // 3) 打开该行 exb：返回值/异常都是固定噪音，以窗口真现 + CRX marker 为权威
+                bool alreadyOpen = false;
+                try { app.OpenFile2(exbPath, false, true, out alreadyOpen); }
+                catch (Exception ex) { log(Tag + ": OpenFile2 异常（exb 固定噪音，吞掉）" + ex.Message); }
+                log(Tag + ": OpenFile2 已投递 " + exbPath + "（alreadyOpen=" + alreadyOpen + "，仅代表入队，不算成功）");
+
+                // 4) 定窗名：优先句柄差集；同名 exb 原本已打开（无新窗口）时按 MDI 活动图纸视图接管
+                if (!WaitForNewDrawingWindow(baseline, 8000, log, stop, out hwnd, out winWhy))
                 {
-                    hwnd = act;
-                    winWhy = "句柄差集未命中（" + winWhy + "），按 MDI 活动图纸视图接管；身份未独立确认（第三态）";
+                    // exb 上一轮已打开时 OpenFile2 不再产生新窗口，差集白等；
+                    // 一律回退到 MDI 活动图纸视图，并如实标注「身份未独立确认」第三态。
+                    IntPtr act = FindActiveDraftView();
+                    if (act != IntPtr.Zero)
+                    {
+                        hwnd = act;
+                        winWhy = "句柄差集未命中（" + winWhy + "），按 MDI 活动图纸视图接管；身份未独立确认（第三态）";
+                    }
+                }
+                if (hwnd == IntPtr.Zero)
+                {
+                    r.Summary = "二维码制作 verified、exb 插入 capability：打开未确认，" + winWhy + "（不通知 CRX，绝不盲写）";
+                    log(Tag + ": " + r.Summary);
+                    return r;
+                }
+                log(Tag + ": 定窗名 OK hwnd=0x" + hwnd.ToInt64().ToString("X") + "；" + winWhy);
+
+                // 4' 开图就绪/稳定闸：OpenFile2 返回 / 窗口真现 ≠ 文档就绪（CAXA 还要跑收尾与
+                //    内嵌 3D 视图更新）。连续 stableMs 无模态框、CRX PING 通、目标窗口仍在才放行。
+                string stableWhy;
+                if (!WaitForDrawingStable(hwnd, 3000, 60000, log, stop, out stableWhy))
+                {
+                    int cleaned = NativeBitmapInsert.CloseResidualDialogs();
+                    if (cleaned > 0)
+                        log(Tag + ": 稳定闸失败后已清理宿主残留对话框 " + cleaned + " 个（下次开图不再被堵）");
+                    r.Summary = "二维码制作 verified、exb 插入 capability：开图未稳定，" + stableWhy + "（不前置、不通知 CRX）";
+                    log(Tag + ": " + r.Summary);
+                    return r;
                 }
             }
-            if (hwnd == IntPtr.Zero)
-            {
-                r.Summary = "二维码制作 verified、exb 插入 capability：打开未确认，" + winWhy + "（不通知 CRX，绝不盲写）";
-                log(Tag + ": " + r.Summary);
-                return r;
-            }
-            log(Tag + ": 定窗名 OK hwnd=0x" + hwnd.ToInt64().ToString("X") + "；" + winWhy);
-
-            // 4' 开图就绪/稳定闸：OpenFile2 返回 / 窗口真现 ≠ 文档就绪（CAXA 还要跑收尾与
-            //    内嵌 3D 视图更新）。连续 stableMs 无模态框、CRX PING 通、目标窗口仍在才放行。
-            string stableWhy;
-            if (!WaitForDrawingStable(hwnd, 3000, 60000, log, stop, out stableWhy))
-            {
-                int cleaned = NativeBitmapInsert.CloseResidualDialogs();
-                if (cleaned > 0)
-                    log(Tag + ": 稳定闸失败后已清理宿主残留对话框 " + cleaned + " 个（下次开图不再被堵）");
-                r.Summary = "二维码制作 verified、exb 插入 capability：开图未稳定，" + stableWhy + "（不前置、不通知 CRX）";
-                log(Tag + ": " + r.Summary);
-                return r;
-            }
+            finally { PopupAutoYes.Disarm(); }   // 开图段结束（含异常/停止/失败路径）一律撤防，绝不带进插入段
 
             // 通知闸：等 CRX 自己的加载信号（marker），冷态绝不投会动手的命令（坑 146/151）
             if (!WaitForCrx(30000, log, stop))
@@ -337,6 +348,8 @@ namespace caxa3dBatchMaster
                 r.Summary = "二维码制作 verified、exb 插入 attempt：宿主插入图片命令未获实体增量、180 s 内未落图（第三态）" +
                             (state == null ? "<无回包>" : state.Status + " " + state.Message) +
                             "；视图更新提示守护处理 " + NativeQrDialog.ViewPromptsHandled + " 次" +
+                            (NativeQrDialog.SizeCheckHandled > 0
+                                ? "（其中尺寸检查 " + NativeQrDialog.SizeCheckHandled + " 次已代点「取消」）" : "") +
                             (NativeQrDialog.ViewPromptPresent() ? "（当前仍挂着白名单提示框）" : "");
                 log(Tag + ": " + r.Summary);
                 return r;

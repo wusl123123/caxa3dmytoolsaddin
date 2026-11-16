@@ -5,7 +5,10 @@
 //   这个 #32770 占住主线程 ⇒ 命令停在等待输入、delta 恒 0，下一轮还挡在 OpenFile2 前面。
 //   守护只在 ArmViewGuard(150 s) 的激活窗口内动手，只认明确白名单文本，不干预其它对话框：
 //     ①「3D视图…数据源更新」→ 点「是」（重算视图由宿主决定）；
-//     ②「输入信息为空」→ 点「确定」。
+//     ②「输入信息为空」→ 点「确定」；
+//     ③「尺寸检查」（按对话框标题认，开 exb 改链重新链接 3D 模型触发）→ 点「取消」。
+//       口径与 PopupAutoYes（刷新工程图同款）一致：列出的失效尺寸一律不重建/不删，
+//       点「确定」会触发重建＝意外改动图纸，绝不走；点不到「取消」只记日志放人工。
 //   风险留痕：点「是」触发视图重生成，耗时比「否」长且有渲染表面 AV 历史（坑 16）；
 //   若实机退出 CAXA，按「trace 断点 + _crx.log 末行 + dmp 时间戳」取证。
 //
@@ -44,6 +47,9 @@ namespace caxa3dBatchMaster
         private static int _guardStarted;
         private static volatile int _viewPromptsHandled;
         public static int ViewPromptsHandled { get { return _viewPromptsHandled; } }
+        // 「尺寸检查」单独计数（2026-11-16：工程图附加二维码开图期被这张框堵死，用户实测截图）
+        private static volatile int _sizeCheckHandled;
+        public static int SizeCheckHandled { get { return _sizeCheckHandled; } }
 
         private static void Q(string s)
         {
@@ -77,7 +83,7 @@ namespace caxa3dBatchMaster
                 t.Start();
             }
             Q("视图更新提示守护已激活 " + seconds + " s（白名单：「3D视图数据源更新」→点「" +
-              kViewPromptChoice + "」；「输入信息为空」→点「确定」；不干预其它对话框）");
+              kViewPromptChoice + "」；「输入信息为空」→点「确定」；「尺寸检查」→点「取消」；不干预其它对话框）");
             if (log != null)
             {
                 try { log("视图更新提示守护已激活 " + seconds + " s（白名单自动点「" + kViewPromptChoice + "」）"); }
@@ -94,7 +100,8 @@ namespace caxa3dBatchMaster
 
         private const string kViewPromptChoice = "是";
 
-        /// <summary>只认两个白名单：①「3D视图…数据源更新」+「是」按钮；②「输入信息为空」+「确定」按钮。</summary>
+        /// <summary>只认三条白名单：①「3D视图…数据源更新」+「是」按钮；②「输入信息为空」+「确定」按钮；
+        /// ③标题含「尺寸检查」+「取消」按钮（开 exb 改链触发，点取消不重建失效尺寸）。</summary>
         private static IntPtr FindViewPrompt(out List<Ctl> ctlsOut)
         {
             IntPtr found = IntPtr.Zero;
@@ -122,7 +129,9 @@ namespace caxa3dBatchMaster
                     if (oc.ToString().StartsWith("WindowsForms", StringComparison.OrdinalIgnoreCase)) return true;
                 }
                 List<Ctl> cs = ListControls(h);
-                bool viewHint = false, emptyHint = false, hasYes = false, hasOk = false;
+                bool viewHint = false, emptyHint = false, hasYes = false, hasOk = false, hasCancel = false;
+                // 「尺寸检查」按标题认（这张框正文是失效尺寸列表，正文里没有固定关键词）
+                bool sizeCheck = title.IndexOf("尺寸检查", StringComparison.Ordinal) >= 0;
                 foreach (Ctl c in cs)
                 {
                     if ((c.Text.IndexOf("3D视图", StringComparison.Ordinal) >= 0 &&
@@ -136,9 +145,10 @@ namespace caxa3dBatchMaster
                         if (t.StartsWith("是", StringComparison.Ordinal) &&
                             t.IndexOf("否", StringComparison.Ordinal) < 0) hasYes = true;
                         if (t.IndexOf("确定", StringComparison.Ordinal) >= 0) hasOk = true;
+                        if (t.IndexOf("取消", StringComparison.Ordinal) >= 0) hasCancel = true;
                     }
                 }
-                if ((viewHint && hasYes) || (emptyHint && hasOk))
+                if ((viewHint && hasYes) || (emptyHint && hasOk) || (sizeCheck && hasCancel))
                 {
                     found = h;
                     hit = cs;
@@ -170,8 +180,11 @@ namespace caxa3dBatchMaster
                 if (n >= 3) { Thread.Sleep(400); continue; }
                 tried[dlg] = n + 1;
                 _viewPromptsHandled++;
-                Q("视图更新提示命中 hwnd=0x" + dlg.ToInt64().ToString("X") + " 第 " + (n + 1) + " 次（已代点）");
 
+                // 白名单分诊：「尺寸检查」按标题认、必须最先判（最特定）——它只能点「取消」，
+                // 若被 viewHint/emptyHint 抢先分诊会点「是/确定」＝重建失效尺寸＝意外改动图纸。
+                bool sizeCheck = ReadText(dlg).IndexOf("尺寸检查", StringComparison.Ordinal) >= 0;
+                if (sizeCheck) _sizeCheckHandled++;
                 bool viewHint = false, emptyHint = false;
                 if (ctls != null)
                     foreach (Ctl c in ctls)
@@ -181,12 +194,16 @@ namespace caxa3dBatchMaster
                         if (c.Text.IndexOf("输入信息为空", StringComparison.Ordinal) >= 0) emptyHint = true;
                     }
 
-                Ctl btn = viewHint ? FindButton(ctls, kViewPromptChoice) :
+                string want = sizeCheck ? "取消" :
+                              viewHint ? kViewPromptChoice : "确定";
+                Ctl btn = sizeCheck ? FindButton(ctls, "取消") :
+                          viewHint ? FindButton(ctls, kViewPromptChoice) :
                           emptyHint ? FindButton(ctls, "确定") : null;
+                Q((sizeCheck ? "尺寸检查弹窗" : "视图更新提示") + "命中 hwnd=0x" +
+                  dlg.ToInt64().ToString("X") + " 第 " + (n + 1) + " 次（拟代点「" + want + "」）");
                 if (btn == null)
                 {
-                    Q("白名单命中但没找到「" + (viewHint ? kViewPromptChoice : "确定") +
-                      "」按钮（下一轮按实机 ID 精确化）");
+                    Q("白名单命中但没找到「" + want + "」按钮（下一轮按实机 ID 精确化）");
                 }
                 else
                 {

@@ -27,8 +27,6 @@ namespace caxa3dCXDFTViewUpdate
         private readonly Button _btnStop;
         private readonly Button _btnClear;
         private readonly Button _btnSaveLog;
-        private readonly Button _btnRegCrx;
-        private readonly Button _btnUnregCrx;
         private readonly Label _lblFolder;
         private readonly ListView _list;
         private readonly ColumnHeader _colNo;
@@ -74,8 +72,6 @@ namespace caxa3dCXDFTViewUpdate
             _btnStop = new Button { Text = "停止", Width = 70, Height = 30, Location = new Point(236, 10), Enabled = false };
             _btnClear = new Button { Text = "清空日志", Width = 90, Height = 30, Location = new Point(314, 10) };
             _btnSaveLog = new Button { Text = "保存日志", Width = 90, Height = 30, Location = new Point(412, 10) };
-            _btnRegCrx = new Button { Text = "注册CRX", Width = 90, Height = 30, Location = new Point(510, 10) };
-            _btnUnregCrx = new Button { Text = "卸载CRX", Width = 90, Height = 30, Location = new Point(608, 10) };
 
             // 方案 A：后台化（不抢前台）——批处理期间把图纸环境进程（CDRAFT_M_IC.exe）压到后台，
             // 既不让它抢前台，也不让它占屏幕。默认开启；一旦怀疑它引起异常，取消勾选即可当场关掉
@@ -83,7 +79,7 @@ namespace caxa3dCXDFTViewUpdate
             _chkBackground = new CheckBox
             {
                 Text = "后台化（不抢前台）", Width = 176, Height = 24,
-                Location = new Point(706, 13), Checked = true
+                Location = new Point(510, 13), Checked = true
             };
             _chkBackground.CheckedChanged += (s, e) => { ForegroundGuard.Enabled = _chkBackground.Checked && _running; };
 
@@ -96,7 +92,7 @@ namespace caxa3dCXDFTViewUpdate
                 Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top
             };
 
-            panel.Controls.AddRange(new Control[] { _btnPick, _btnStart, _btnStop, _btnClear, _btnSaveLog, _btnRegCrx, _btnUnregCrx, _chkBackground, _lblFolder });
+            panel.Controls.AddRange(new Control[] { _btnPick, _btnStart, _btnStop, _btnClear, _btnSaveLog, _chkBackground, _lblFolder });
 
             _list = new ListView
             {
@@ -122,8 +118,6 @@ namespace caxa3dCXDFTViewUpdate
             _btnStop.Click += (s, e) => { _stopRequested = true; _lblStatus.Text = "正在停止……"; };
             _btnClear.Click += (s, e) => { _list.Items.Clear(); };
             _btnSaveLog.Click += BtnSaveLog_Click;
-            _btnRegCrx.Click += (s, e) => RunCrxScript(true);
-            _btnUnregCrx.Click += (s, e) => RunCrxScript(false);
         }
 
         // ================================================================ 入口
@@ -651,71 +645,6 @@ PopupAutoYes.Enabled = true;
                 return true;
             }, IntPtr.Zero);
             return found;
-        }
-
-        // ================================================================ CRX 注册 / 卸载
-
-        /// <summary>注册/卸载 CRX 命令桥模块：调用随插件分发的 register-crx.ps1 / unregister-crx.ps1
-        /// （脚本自身提权，扫描本机全部 CAXA 3D 版本，把 caxa3dCXDFTViewUpdate.crx 拷进
-        /// CAXADraft\bin 并幂等登记 Modules\CxAutorun.cx；只动本插件自己的条目，
-        /// 不影响其它插件共存）。下次 CAXADraft（图纸环境）启动时生效。</summary>
-        private void RunCrxScript(bool register)
-        {
-            if (_running)
-            {
-                MessageBox.Show("正在处理中，请先停止或等待完成。", "刷新图纸视图",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            string script = FindResource(register ? "register-crx.ps1" : "unregister-crx.ps1");
-            if (script == null)
-            {
-                MessageBox.Show("未找到 CRX " + (register ? "注册" : "卸载") +
-                    "脚本（register-crx.ps1 / unregister-crx.ps1）。", "刷新图纸视图",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-            try
-            {
-                using (var proc = new System.Diagnostics.Process())
-                {
-                    proc.StartInfo = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "powershell.exe",
-                        Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','" + script + "'\"",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    proc.Start();
-                }
-                Diagnostics.Log("CRX " + (register ? "注册" : "卸载") + "：已请求执行（如弹 UAC 请允许）" + script);
-            }
-            catch (Exception ex)
-            {
-                Diagnostics.Log("CRX 脚本启动失败：" + ex);
-                MessageBox.Show("执行脚本失败：" + ex.Message + "\n\n脚本：" + script,
-                    "刷新图纸视图", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        /// <summary>从输出目录逐级向上查找随插件分发的文件（不写死绝对路径）。</summary>
-        private static string FindResource(string fileName)
-        {
-            var dirs = new List<string>();
-            try { dirs.Add(AppDomain.CurrentDomain.BaseDirectory); } catch { }
-            try { dirs.Add(System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location)); } catch { }
-            foreach (string d in dirs.ToArray())
-            {
-                string cur = d;
-                for (int i = 0; i < 6 && !string.IsNullOrEmpty(cur); i++)
-                {
-                    string cand = Path.Combine(cur, fileName);
-                    if (File.Exists(cand)) return cand;
-                    cur = Path.GetDirectoryName(cur);
-                }
-            }
-            return null;
         }
 
         // ================================================================ UI 辅助
