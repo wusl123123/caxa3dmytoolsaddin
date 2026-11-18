@@ -48,6 +48,7 @@ namespace caxa3dButton
         private Button _btnShowAllTypes;
         private Button _btnAssemblySort;
         private Button _btnActivatePart;
+        private Button _btnScDesc;
         private Button _btnStop;
         private CubeForm _cubeForm;
         private AssemblySortForm _assemblySortForm;
@@ -211,6 +212,11 @@ namespace caxa3dButton
             _btnActivatePart = MakeButton("激活/取消激活零件", 418, 80, 150);
             _btnActivatePart.Click += delegate { RunActivateToggle(); };
 
+            // SC物料描述=零件名（移植自 caxa3dButton 独立工程，11-18 用户需求）：
+            // 读共享表 SC物料描述 → 改零件名（顶层零部件，含装配，展开件除外）
+            _btnScDesc = MakeButton("SC物料描述=零件名", 583, 80, 170);
+            _btnScDesc.Click += OnScDescClick;
+
             // ---- 小工具表格区（四列，单元格 = 工具）----
             _grid = BuildGrid();
             _grid.Bounds = new Rectangle(12, TableTop, 656, _tableHeight);
@@ -235,7 +241,7 @@ namespace caxa3dButton
             Controls.AddRange(new Control[] {
                 _btnTopMost, _btnDrawNoSep, _btnLog, _btnSaveLog, _btnClearLog,
                 _btnOpenEnv, _btnCloseEnv, _btnOpenDwg, _btnCube, _btnStop,
-                _btnHideAllTypes, _btnShowAllTypes, _btnAssemblySort, _btnActivatePart,
+                _btnHideAllTypes, _btnShowAllTypes, _btnAssemblySort, _btnActivatePart, _btnScDesc,
                 _grid, _lblStatus, _txtLog });
 
             FillTable();
@@ -426,7 +432,8 @@ namespace caxa3dButton
                 totalMin += need;
             }
 
-            int clientWidth = Math.Max(680, totalMin + 48);
+            // 按钮区最右 = 第三行「SC物料描述=零件名」右缘 583+170=753，+12 边距 = 765
+            int clientWidth = Math.Max(765, totalMin + 48);
             ClientSize = new Size(clientWidth, 674);
             MinimumSize = new Size(clientWidth + 16, 594);
         }
@@ -1592,6 +1599,35 @@ namespace caxa3dButton
             catch (Exception ex) { verdict = "投递异常：" + ex.Message; Diagnostics.Log("Toggle fail: " + ex); }
 
             SetStatus(verdict, verdict.StartsWith("已投递") ? Color.Black : Color.Firebrick);
+        }
+
+        // ================================================================ SC物料描述=零件名
+        // 11-18 用户需求（移植自 caxa3dButton 独立工程）：读共享表「SC物料描述」→ 填入零件名
+        // （IZElement.set_Name 槽10 直调，get_Name 槽9 Ordinal 回读判据）。
+        // 顶层零部件（含装配，展开件除外），与「打开设计环境」流程里的 SC物料描述 写入互为逆向。
+
+        private void OnScDescClick(object sender, EventArgs e)
+        {
+            if (_busy) return;
+            _busy = true;
+            _btnScDesc.Enabled = false;
+            try
+            {
+                SetStatus("正在执行 SC物料描述=零件名 …", Color.DarkOrange);
+                string verdict = ScDescNameTool.Apply(_siteApp, msg => Diagnostics.Log(msg));
+                SetStatus(verdict, Color.DimGray);
+                Diagnostics.Log("sc-desc：" + verdict);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("SC物料描述=零件名 失败：" + ex.Message, Color.Firebrick);
+                Diagnostics.Log("sc-desc failed: " + ex);
+            }
+            finally
+            {
+                _busy = false;
+                if (!IsDisposed) _btnScDesc.Enabled = true;
+            }
         }
 
         // ================================================================ 打开工程图联动动作

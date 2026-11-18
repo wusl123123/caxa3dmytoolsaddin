@@ -67,6 +67,9 @@ $plugins = @(
        Extra = @('.txt') },
     # 工程图技术要求备份（系统工具列）：纯文件 + 注册表操作，无自带资源，只有 DLL
     @{ Name = 'caxa3dexbTechSpecsbak';       Project = (Join-Path $root 'plugins\caxa3dexbTechSpecsbak\caxa3dexbTechSpecsbak.csproj') },
+    # 自定义设计库备份（系统工具列，2026-11-17 由独立 Add-in caxa3dmytoolboxbak 移植）：
+    # 纯文件级备份/还原 %LOCALAPPDATA%\CAXA\CAXA 3D\<版本>\<语言>\ToolBox，无自带资源，只有 DLL
+    @{ Name = 'caxa3dmytoolboxbak';          Project = (Join-Path $root 'plugins\caxa3dmytoolboxbak\caxa3dmytoolboxbak.csproj') },
     # 批量大师（常用列）：需带默认属性表格 .xlsx、两张用户规则 .txt、图纸环境 CRX 桥
     # caxa3dBatchMasterView.crx（第 5 登记点，缺它「刷新工程图」整链不可用）；预热 .exb 已上收 Host
     @{ Name = 'caxa3dBatchMaster';           Project = (Join-Path $root 'plugins\caxa3dBatchMaster\caxa3dBatchMaster.csproj');

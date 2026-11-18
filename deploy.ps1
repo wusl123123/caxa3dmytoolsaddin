@@ -33,7 +33,7 @@ foreach ($suffix in @('_trace.log', '_crx.log')) {
     if (Test-Path $logPath) { Remove-Item $logPath -Force -ErrorAction SilentlyContinue }
 }
 
-$ScriptVersion = '2026-11-13.1'
+$ScriptVersion = '2026-11-17.1'
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = if ($WorkRoot) { $WorkRoot } else { $PSScriptRoot }
@@ -107,13 +107,23 @@ function Write-CaxaProbe {
     foreach ($line in $script:CaxaProbe) { Write-Host "  $line" -ForegroundColor DarkGray }
 }
 
+# Test-Path 安全版（2026-11-17 第三方机器事故 = 本函数存在的真因）：
+# 目标路径「存在但无遍历权限」时，Test-Path 在 $ErrorActionPreference='Stop' 下抛
+# ItemExistsUnauthorizedAccessError 直接中断整轮安装（实测卡死在「盘探测 D:\Program
+# Files\CAXA\CAXA 3D Access is denied」，台账都没打出来）。探测段所有 Test-Path 一律走这里：
+# 权限拒绝/读取失败按「不存在」处理并继续，绝不中断探测流程。
+function Test-PathSafe([string]$p) {
+    if ([string]::IsNullOrWhiteSpace($p)) { return $false }
+    try { return (Test-Path -LiteralPath $p -ErrorAction SilentlyContinue) } catch { return $false }
+}
+
 function Test-CaxaVersionDir([string]$dir) {
     if ([string]::IsNullOrWhiteSpace($dir)) { return $false }
     $dir = $dir.TrimEnd('\', '/')
     if ((Split-Path -Leaf $dir) -notmatch '^\d{4}$') { return $false }
     if ($dir -match '(?i)ICS\s*VIEWER') { return $false }        # 旁系产品直接排除
-    if (-not (Test-Path -LiteralPath (Join-Path $dir 'bin'))) { return $false }
-    if (-not (Test-Path -LiteralPath (Join-Path $dir 'Config\IronCad.Addin.config'))) { return $false }
+    if (-not (Test-PathSafe (Join-Path $dir 'bin'))) { return $false }
+    if (-not (Test-PathSafe (Join-Path $dir 'Config\IronCad.Addin.config'))) { return $false }
     return $true
 }
 
@@ -147,6 +157,9 @@ function Get-FixedDriveRoots {
     } catch { Add-CaxaProbe ('DriveInfo 枚举失败：' + $_.Exception.Message) }
     foreach ($p in @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue)) {
         if (-not $p.Root) { continue }
+        # PS5.1 的 Get-PSDrive 无 DriveType（坑 163），网络映射盘/受限卷会混进候选；
+        # 盘根本身不可达（Access denied）一律跳过，绝不把读不了的盘交给下游探测
+        if (-not (Test-PathSafe $p.Root)) { Add-CaxaProbe ('补充盘不可达，跳过：' + $p.Root); continue }
         if ($out -notcontains $p.Root) { $out += $p.Root }
     }
     return $out
@@ -173,7 +186,7 @@ function Get-CaxaRegInstallDirs {
     $out = @()
     foreach ($hive in @('HKLM:\SOFTWARE\CAXA', 'HKLM:\SOFTWARE\WOW6432Node\CAXA',
                         'HKCU:\SOFTWARE\CAXA', 'HKCU:\SOFTWARE\WOW6432Node\CAXA')) {
-        if (-not (Test-Path -LiteralPath $hive)) { continue }
+        if (-not (Test-PathSafe $hive)) { continue }
         foreach ($k1 in @(Get-ChildItem -LiteralPath $hive -ErrorAction SilentlyContinue)) {
             $out += Read-CaxaInstallValues $k1
             foreach ($k2 in @(Get-ChildItem -LiteralPath $k1.PSPath -ErrorAction SilentlyContinue)) {
@@ -226,7 +239,7 @@ function Get-CaxaRoots {
         foreach ($rel in @('Program Files\CAXA\CAXA 3D', 'Program Files (x86)\CAXA\CAXA 3D',
                            'CAXA\CAXA 3D', 'CAXA')) {
             $p = Join-Path $drv $rel
-            if (-not (Test-Path -LiteralPath $p)) { Add-CaxaProbe ('盘探测（不存在）：' + $p); continue }
+            if (-not (Test-PathSafe $p)) { Add-CaxaProbe ('盘探测（不存在/不可达）：' + $p); continue }
             Add-CaxaProbe ('盘探测：' + $p)
             $roots += $p
         }
@@ -297,7 +310,7 @@ function Resolve-CaxaCandidate {
                 Add-CaxaProbe ('收为版本目录：' + $r)
                 $local += (Get-Item -LiteralPath $r)
             }
-        } elseif (Test-Path -LiteralPath (Join-Path $r 'bin')) {
+        } elseif (Test-PathSafe (Join-Path $r 'bin')) {
             Add-CaxaProbe ('跳过非完整 CAXA 3D 版本目录（缺 Config\IronCad.Addin.config）：' + $r)
             Write-Host ("  跳过非完整 CAXA 3D 版本目录：{0}（有 bin 但缺 Config\IronCad.Addin.config，典型如 CAXA ICS VIEWER）" -f $r) -ForegroundColor DarkYellow
         }
@@ -309,7 +322,7 @@ function Resolve-CaxaCandidate {
     foreach ($v in @(Get-ChildItem -LiteralPath $r -Directory -ErrorAction SilentlyContinue)) {
         if ($v.Name -notmatch '^\d{4}$') { continue }
         if (-not (Test-CaxaVersionDir $v.FullName)) {
-            if (Test-Path -LiteralPath (Join-Path $v.FullName 'bin')) {
+            if (Test-PathSafe (Join-Path $v.FullName 'bin')) {
                 Add-CaxaProbe ('跳过非 CAXA 3D 目录（无 Config\IronCad.Addin.config）：' + $v.FullName)
                 Write-Host ("  跳过非 CAXA 3D 目录：{0}（无 Config\IronCad.Addin.config）" -f $v.FullName) -ForegroundColor DarkYellow
             }
@@ -350,9 +363,10 @@ function Get-CaxaVersionDirs {
 # 2026-11-07 补入 caxa3dBatchMaster：独立 Add-in 若仍登记就抢在集合体前面被加载，
 # LoadFrom 返回的是已加载那份（同为 1.0.0.0 / PKT 56647e1eee90f6d4）⇒ 工具箱静默缺席。
 # 2026-11-09 补入 caxa3dButton：按钮工具移植为子插件，独立 Add-in 若仍登记会与集合体重复弹窗。
-$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll', 'caxa3ddiffrename.dll')
-$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton', 'caxa3ddiffrename')
-$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}', '{6E2015C2-DBF7-47E7-BC12-B3EA50738B85}')
+# 2026-11-17 补入 caxa3dmytoolboxbak：设计库备份移植为子插件（系统工具列），同上撤销独立登记。
+$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll', 'caxa3ddiffrename.dll', 'caxa3dmytoolboxbak.dll')
+$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton', 'caxa3ddiffrename', 'caxa3dmytoolboxbak')
+$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}', '{6E2015C2-DBF7-47E7-BC12-B3EA50738B85}', '{55922617-DA1C-4C13-9513-D017B15AE591}')
 
 # 已移出集合体的图纸环境 CRX 桥：部署时清掉 CAXADraft\bin 旧文件与 CxAutorun.cx 旧登记行
 # caxa3dcodenameextraction.crx 是子插件改名前（与独立插件同名化）的旧桥，必须连登记行一起清（坑 168）

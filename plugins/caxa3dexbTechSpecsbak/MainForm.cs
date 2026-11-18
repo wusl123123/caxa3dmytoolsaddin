@@ -31,6 +31,8 @@ namespace caxa3dexbTechSpecsbak
         private readonly IZBaseApp _app;
         private readonly TextBox _log = new TextBox();
         private readonly CheckedListBox _list = new CheckedListBox();
+        private readonly ContextMenuStrip _menu = new ContextMenuStrip();
+        private int _menuIndex = -1;          // 右键菜单对应的列表行号（菜单打开时定位）
         private readonly Label _tip = new Label();
         private readonly Button _btnTop = new Button();
         private readonly Button _btnRefresh = new Button();
@@ -130,6 +132,11 @@ namespace caxa3dexbTechSpecsbak
             _list.IntegralHeight = false;
             _list.HorizontalScrollbar = true;
             _list.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+
+            // 右键「打开所在文件夹」：打开时先定位到鼠标所指条目，再打开该条目库文件所在目录
+            _list.ContextMenuStrip = _menu;
+            _menu.Items.Add("打开所在文件夹", null, OnOpenFolderClick);
+            _menu.Opening += OnMenuOpening;
 
             _log.SetBounds(12, 214, 856, 394);
             _log.Multiline = true;
@@ -296,6 +303,38 @@ namespace caxa3dexbTechSpecsbak
                 if (_list.GetItemChecked(i)) picked.Add(_items[i]);
             }
             return picked;
+        }
+
+        // ---------------------------------------------------------------- 右键打开所在文件夹
+
+        /// <summary>右键列表时先定位到鼠标所指条目；指不到任何条目就取消菜单。</summary>
+        private void OnMenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            _menuIndex = _list.IndexFromPoint(_list.PointToClient(Cursor.Position));
+            if (_menuIndex < 0 || _menuIndex >= _items.Count) { _menuIndex = -1; e.Cancel = true; return; }
+            _list.SelectedIndex = _menuIndex;
+        }
+
+        /// <summary>打开当前条目库文件（NSpecLib.xml）所在文件夹，并用资源管理器定位到该文件。</summary>
+        private void OnOpenFolderClick(object sender, EventArgs e)
+        {
+            if (_menuIndex < 0 || _menuIndex >= _items.Count) return;
+            SpecItem it = _items[_menuIndex];
+            string folder = null;
+            try
+            {
+                if (string.IsNullOrEmpty(it.FilePath)) { AddLog("该条目没有文件路径，无法打开"); return; }
+                folder = Path.GetDirectoryName(it.FilePath);
+                if (!File.Exists(it.FilePath)) { AddLog("文件不存在：" + it.FilePath); return; }
+                System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + it.FilePath + "\"");
+                AddLog("已打开所在文件夹：" + folder);
+                Diagnostics.Log("open folder: " + folder);
+            }
+            catch (Exception ex)
+            {
+                AddLog("打开文件夹失败：" + (folder ?? it.FilePath) + " → " + ex.Message);
+                Diagnostics.Log("open folder failed: " + ex, 5000);
+            }
         }
 
         // ---------------------------------------------------------------- 备份

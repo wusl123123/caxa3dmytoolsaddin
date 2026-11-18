@@ -76,6 +76,33 @@ namespace caxa3dButton
             finally { Marshal.Release(pMgr); }
         }
 
+        /// <summary>
+        /// 读共享表单个属性（铁律 7 同口径：判据只有 IsSharedMgr()=true，三候选全试，全否即读不到）。
+        /// 返回 true = 读到（value 为属性值，可能空串）；false = 共享表拿不到或属性不存在（err 区分）。
+        /// </summary>
+        public static bool TryReadSharedProp(IZElement elem, string name, string tag, Action<string> log,
+            out string value, out string err)
+        {
+            value = null;
+            err = null;
+            IntPtr pMgr = GetSharedCustomPropMgr(elem, tag, log);
+            if (pMgr == IntPtr.Zero)
+            {
+                err = "共享自定义属性表获取失败（三候选都无 IsSharedMgr=true），按共享表铁律不读";
+                return false;
+            }
+            try
+            {
+                if (!SharedGetValueByName(pMgr, name, out value))
+                {
+                    err = "GetValueByName(" + name + ") 失败（属性可能不存在）";
+                    return false;
+                }
+                return true;
+            }
+            finally { Marshal.Release(pMgr); }
+        }
+
         // ==================================================================== 共享表获取（三候选 + IsSharedMgr 铁律）
 
         private static IntPtr GetSharedCustomPropMgr(IZElement elem, string tag, Action<string> log)

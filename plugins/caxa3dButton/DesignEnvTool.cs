@@ -161,7 +161,9 @@ namespace caxa3dButton
 
             var sb = new System.Text.StringBuilder();
             int nParts = 0, nSep = 0, nFill = 0, nFillFail = 0, nSkip = 0;
+            int nScOk = 0, nScFail = 0;
             var fillFails = new List<string>();
+            var scFails = new List<string>();
 
             foreach (object o in kids)
             {
@@ -169,6 +171,27 @@ namespace caxa3dButton
                 if (el == null) continue;
                 int type = -1;
                 try { type = (int)el.Type; } catch { }
+                string partName = ProbeCommon.Safe(() => el.Name, "<无名>");
+
+                // ★ 11-18 用户需求：SC物料描述 = 零件名（顶层零部件，含装配；展开件除外）。
+                //   写共享表（铁律 7），判据 = WriteNamedSharedProps 内部写后回读一致，HRESULT 不算成功。
+                if (IsComponentType(type) && partName.IndexOf("展开", StringComparison.Ordinal) < 0)
+                {
+                    string wErr;
+                    var vals = new Dictionary<string, string> { { "SC物料描述", partName } };
+                    if (SharedPropWriter.WriteNamedSharedProps(el, vals, tag, log, out wErr))
+                    {
+                        nScOk++;
+                        log(tag + ": 「" + partName + "」SC物料描述=零件名 写入成功（回读一致）");
+                    }
+                    else
+                    {
+                        nScFail++;
+                        scFails.Add("「" + partName + "」" + wErr);
+                        log(tag + ": 「" + partName + "」SC物料描述写入失败：" + wErr);
+                    }
+                }
+
                 if (type == ElemTypeAssembly)
                 {
                     log(tag + ": 跳过装配「" + ProbeCommon.Safe(() => el.Name, "<无名>") + "」（不穿透）");
@@ -184,11 +207,10 @@ namespace caxa3dButton
                     continue;
                 }
 
-                string partName = ProbeCommon.Safe(() => el.Name, "<无名>");
-
                 // 展开件是钣金件的「展开态配置产物」，不是独立零部件（日志实证：它同样出现在
                 // GetChildElements 顶层、类型 20）。若参与图号分离会写出「展开SC08020102.01-04」
                 // 这类错误图号污染 BOM —— 与 SheetSizeTool.Validate「名称含展开即拒填」同口径，跳过。
+                // （SC物料描述写入同样跳过展开件，见上方 IsComponentType 分支条件。）
                 if (partName.IndexOf("展开", StringComparison.Ordinal) >= 0)
                 {
                     log(tag + ": 跳过展开件「" + partName + "」（钣金展开态配置产物，非独立零部件）");
@@ -252,8 +274,11 @@ namespace caxa3dButton
 
             sb.AppendLine("共处理 " + nParts + " 个零部件（跳过 " + nSkip + " 个装配/展开件/非零件）：图号分离 " + nSep +
                 " 个，规格/材料回填成功 " + nFill + " 个（同名虚拟件）" +
-                (nFillFail == 0 ? "。" : "，失败 " + nFillFail + " 个："));
+                (nFillFail == 0 ? "" : "，失败 " + nFillFail + " 个："));
             foreach (string ff in fillFails) sb.AppendLine("  ★ " + ff);
+            sb.AppendLine("SC物料描述=零件名：成功 " + nScOk + " 个（顶层零部件，含装配，展开件除外，写共享表）" +
+                (nScFail == 0 ? "。" : "，失败 " + nScFail + " 个："));
+            foreach (string sf in scFails) sb.AppendLine("  ★ " + sf);
             return sb.ToString().TrimEnd();
         }
 
@@ -425,6 +450,12 @@ namespace caxa3dButton
             if (slash >= 0) n = n.Substring(slash + 1);
             if (n.EndsWith(".ics", StringComparison.OrdinalIgnoreCase)) n = n.Substring(0, n.Length - 4);
             return n;
+        }
+
+        /// <summary>零部件类型（与 AssemblySortTool.IsComponent 同口径）：零件(1)/装配(2)/钣金(20)/多面体(25)/线架(28)/型材(29)。</summary>
+        private static bool IsComponentType(int t)
+        {
+            return t == 1 || t == ElemTypeAssembly || t == ElemTypeSheetMetalPart || t == 25 || t == 28 || t == 29;
         }
     }
 }
