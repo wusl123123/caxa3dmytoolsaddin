@@ -358,9 +358,9 @@ function Get-CaxaVersionDirs {
 #   之前这里只列了 3 项，卸载后 bin 根会留下另外 5 个已迁入插件的旧 DLL；
 #   2026-11-09 deploy 补入 caxa3dButton 后这里又漏了一项，本轮补齐 —— 漏一项就是「已全部卸载」假结论。
 # 2026-11-17 补入 caxa3dmytoolboxbak：设计库备份移植为子插件（系统工具列），同上撤销独立登记。
-$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll', 'caxa3ddiffrename.dll', 'caxa3dmytoolboxbak.dll')
-$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton', 'caxa3ddiffrename', 'caxa3dmytoolboxbak')
-$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}', '{6E2015C2-DBF7-47E7-BC12-B3EA50738B85}', '{55922617-DA1C-4C13-9513-D017B15AE591}')
+$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll', 'caxa3ddiffrename.dll', 'caxa3dmytoolboxbak.dll', 'caxa3dexbTechSpecsbak.dll')
+$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton', 'caxa3ddiffrename', 'caxa3dmytoolboxbak', 'caxa3dexbTechSpecsbak')
+$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}', '{6E2015C2-DBF7-47E7-BC12-B3EA50738B85}', '{55922617-DA1C-4C13-9513-D017B15AE591}', '{E86F4EEE-F74B-4320-A54B-CA56121E7E01}')
 
 # 部署时投放到 CAXADraft\bin 的图纸环境 CRX 桥（第 5 登记点）。
 # 与 deploy.ps1 的 $crxItems + $removedCrxs 对齐：caxa3dapigetaddin.crx 是 deploy 会主动清理的
@@ -569,7 +569,7 @@ function Remove-DirectorySafe([string]$path) {
 # 本程序自己的 bin 根文件集合（含旧布局散放资源，以及被占用时改名成 .inuse-old / .legacy-bak 的产物）。
 # 判据只认「本程序自己的名字前缀 + 可执行/资源扩展名」：绝不整目录通配，
 # 否则会误删同机兄弟 Add-in（caxa3dexbtracker 的 DLL/预热 exb、caxa3dexbTechSpecsbak 等）。
-$ownBases = @($hostName, 'Caxa3dMyTools.Contracts', 'caxa3didcskill', 'caxa3dapicapture', 'caxa3dBatchMasterView') + $legacyNames
+$ownBases = @($hostName, 'Caxa3dMyTools.Contracts', 'caxa3didcskill', 'caxa3dToolboxBackup', 'caxa3dEbxTechSpecsBackup', 'caxa3dtoolboxmaker', 'caxa3dapicapture', 'caxa3dBatchMasterView') + $legacyNames
 $ownExt   = @('.dll', '.pdb', '.xml', '.config', '.txt', '.xlsx', '.exb', '.ini', '.crx', '.exe', '.manifest')
 
 function Get-OwnBinFile([string]$bin) {
@@ -600,17 +600,20 @@ if ($running) {
 }
 
 # ---------- 独立工具进程检查 ----------
-# caxa3didcskill.exe 是进程外工具，正在运行时 EXE 被锁、删不掉；
-# 它只清理 IRONCAD 后台进程，结束它不影响正在使用的 CAXA。
-$idcProc = @(Get-Process -Name 'caxa3didcskill' -ErrorAction SilentlyContinue)
-if ($idcProc.Count -gt 0) {
-    Write-Host "[提示] 独立工具 caxa3didcskill 正在运行，先行结束以便删除 EXE。" -ForegroundColor Yellow
-    try {
-        Stop-Process -Name 'caxa3didcskill' -Force -ErrorAction Stop
-        Start-Sleep -Milliseconds 300
-        Write-Host "      已结束 caxa3didcskill 进程"
-    } catch {
-        Write-Host "      警告：结束独立工具进程失败 -> $($_.Exception.Message)" -ForegroundColor Yellow
+# 外部工具 EXE 正在运行时文件被锁、删不掉；它们都是进程外工具，结束它们不影响正在使用的 CAXA。
+# 2026-11-19：除后台进程清理工具外，新增两个备份工具（启动器 DLL + 独立 EXE）。
+$toolProcesses = @('caxa3didcskill', 'caxa3dToolboxBackup', 'caxa3dEbxTechSpecsBackup', 'caxa3dtoolboxmaker')
+foreach ($procName in $toolProcesses) {
+    $procList = @(Get-Process -Name $procName -ErrorAction SilentlyContinue)
+    if ($procList.Count -gt 0) {
+        Write-Host "[提示] 独立工具 $procName 正在运行，先行结束以便删除 EXE。" -ForegroundColor Yellow
+        try {
+            Stop-Process -Name $procName -Force -ErrorAction Stop
+            Start-Sleep -Milliseconds 300
+            Write-Host "      已结束 $procName 进程"
+        } catch {
+            Write-Host "      警告：结束独立工具进程失败 -> $($_.Exception.Message)" -ForegroundColor Yellow
+        }
     }
 }
 
@@ -661,8 +664,10 @@ foreach ($v in $versions) {
     foreach ($f in $files) {
         if (-not (Remove-FileSafe $f)) { $hadError = $true }
     }
-    # 独立插件列的工具：整目录会被下面这行删掉，这里再兜底清 bin 根目录的散放拷贝
-    if (-not (Remove-FileSafe (Join-Path $caxaBin $idcExeName))) { $hadError = $true }
+    # 独立工具列的工具：整目录会被下面这行删掉，这里再兜底清 bin 根目录的散放拷贝
+    foreach ($toolExe in @('caxa3didcskill.exe', 'caxa3dToolboxBackup.exe', 'caxa3dEbxTechSpecsBackup.exe', 'caxa3dtoolboxmaker.exe')) {
+        if (-not (Remove-FileSafe (Join-Path $caxaBin $toolExe))) { $hadError = $true }
+    }
     if (-not (Remove-DirectorySafe (Join-Path $caxaBin $hostName))) { $hadError = $true }
     # 独立版 Add-in 散落在 bin 根的随包资源（集合体不往这里放，属孤儿文件）
     foreach ($loose in $looseResidue) {
@@ -767,14 +772,20 @@ foreach ($v in $versions) {
 
     if (Test-Path (Join-Path $caxaBin "$hostName.dll")) { $left += "$($v.Name): bin 仍有 $hostName.dll" }
     if (Test-Path (Join-Path $caxaBin $hostName))       { $left += "$($v.Name): bin 仍有插件目录 $hostName" }
-    if (Test-Path (Join-Path $caxaBin "$hostName\plugins\$idcPluginName")) {
-        $left += "$($v.Name): 仍有独立插件目录 $hostName\plugins\$idcPluginName"
-    }
-    if (Test-Path (Join-Path $caxaBin $idcExeName)) {
-        $left += "$($v.Name): bin 仍有 $idcExeName"
-    }
-    if (@(Get-Process -Name 'caxa3didcskill' -ErrorAction SilentlyContinue).Count -gt 0) {
-        $left += "$($v.Name): 仍有 caxa3didcskill 进程在运行（关掉后重跑）"
+    foreach ($launcher in @(
+            @{ Name = $idcPluginName;             Exe = $idcExeName },
+            @{ Name = 'caxa3dToolboxBackup';      Exe = 'caxa3dToolboxBackup.exe' },
+            @{ Name = 'caxa3dEbxTechSpecsBackup'; Exe = 'caxa3dEbxTechSpecsBackup.exe' },
+            @{ Name = 'caxa3dtoolboxmaker';       Exe = 'caxa3dtoolboxmaker.exe' })) {
+        if (Test-Path (Join-Path $caxaBin "$hostName\plugins\$($launcher.Name)")) {
+            $left += "$($v.Name): 仍有独立工具目录 $hostName\plugins\$($launcher.Name)"
+        }
+        if (Test-Path (Join-Path $caxaBin $launcher.Exe)) {
+            $left += "$($v.Name): bin 仍有 $($launcher.Exe)"
+        }
+        if (@(Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($launcher.Exe)) -ErrorAction SilentlyContinue).Count -gt 0) {
+            $left += "$($v.Name): 仍有 $($launcher.Exe) 进程在运行（关掉后重跑）"
+        }
     }
     foreach ($crxName in $crxNames) {
         if (Test-Path (Join-Path $caxaBin "CAXADraft\Bin\$crxName")) {

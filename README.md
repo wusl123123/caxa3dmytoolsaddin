@@ -39,11 +39,12 @@ CAXA 3D 内置插件集合体（Add-in Host）与统一工具箱。CAXA 3D 中�
 | `caxa3dBatchMaster` | 批量大师 | 装配/图纸批量处理：批量改名与图号分离、自定义属性批量写入、3D BOM 更新与表格导出，规则与属性表可外置配置 |
 | `caxa3dCXDFTViewUpdate` | 刷新图纸视图 | 批量打开 exb 图纸刷新视图后保存，图纸环境 CRX 桥 + 弹窗代点 + 后台化 |
 | `caxa3didcskill` | 后台进程清理 | 系统工具列启动器，拉起进程外的 `caxa3didcskill.exe` 清理无窗口 IRONCAD 残留进程 |
-| `caxa3dexbTechSpecsbak` | 工程图技术要求备份 | 按 CAXA 版本年度备份/还原「我的技术要求」`NSpecLib.xml`，zip 内带清单、逐项 SHA256 校验、还原前自动留 `.bak` |
+| `caxa3dEbxTechSpecsBackup` | 工程图技术要求备份 | 系统工具列启动器，拉起进程外的 `caxa3dEbxTechSpecsBackup.exe`：按 CAXA 版本年度备份/还原「我的技术要求」`NSpecLib.xml`，zip 内带清单、逐项 SHA256 校验、还原前自动留 `.bak` |
+| `caxa3dToolboxBackup` | 自定义设计库备份 | 系统工具列启动器，拉起进程外的 `caxa3dToolboxBackup.exe`：备份/还原 `%LOCALAPPDATA%\CAXA\CAXA 3D\<版本>\<语言>\ToolBox` 设计库目录 |
 
-工具箱窗口按 `IPlugin.Category` 分四列表格排列：`1. 常用插件`（`BuiltIn`，8 个：`caxa3dAttributeManageraddin`、`caxa3ddiffrename`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dButton`、`caxa3dsheetmaster`、`caxa3dBatchMaster`、`caxa3dCXDFTViewUpdate`）、`2. 系统工具`（`SystemTool`，2 个：`caxa3didcskill`、`caxa3dexbTechSpecsbak`）；`Independent`、`Test` 两类当前无插件（`caxa3dminitool` 已并入 `caxa3dButton`，测试类 `Caxa3dcudeaddin` / `caxa3dapigetaddin` 已删除）。
+工具箱窗口按 `IPlugin.Category` 分四列表格排列：`1. 常用插件`（`BuiltIn`，8 个：`caxa3dAttributeManageraddin`、`caxa3ddiffrename`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dButton`、`caxa3dsheetmaster`、`caxa3dBatchMaster`、`caxa3dCXDFTViewUpdate`）、`2. 系统工具`（`SystemTool`，3 个：`caxa3didcskill`、`caxa3dEbxTechSpecsBackup`、`caxa3dToolboxBackup`）；`Independent`、`Test` 两类当前无插件（`caxa3dminitool` 已并入 `caxa3dButton`，测试类 `Caxa3dcudeaddin` / `caxa3dapigetaddin` 已删除）。
 
-> 独立插件的形态：`plugins\caxa3didcskill\` 里 DLL 只是**启动器**（不引用 ICAPI、不建窗口、不实现业务逻辑），点单元格时由它启动同目录的 `caxa3didcskill.exe`；已有实例则切前台，不重复启动。进程清理只能在进程外做（规则 16.6），EXE 源码在 `tools\caxa3didcskill\`，随安装包一起部署到 `plugins\caxa3didcskill\`。
+> 独立工具的形态：`plugins\<插件名>\` 里 DLL 只是**启动器**（不引用 ICAPI、不建窗口、不实现业务逻辑），点单元格时由它启动同目录的 EXE；已有实例则切前台，不重复启动。EXE 源码在 `tools\<插件名>\`，随安装包一起部署到 `plugins\<插件名>\`。`caxa3didcskill` 因进程清理只能在进程外做（规则 16.6）属此形态；2026-11-19 起 `caxa3dToolboxBackup` / `caxa3dEbxTechSpecsBackup` 两个备份工具也由进程内业务子插件转制为同一形态（纯文件/注册表操作，本就不需要 CAXA 宿主，进程外运行更安全；且 EXE 可脱离 CAXA 直接双击运行）。
 
 ---
 
@@ -70,10 +71,13 @@ caxa3dmytoolsaddin/
     ├── caxa3dBatchMaster/         批量大师（含 CRX 桥子工程 C++ 与外置规则/属性表资源）
     ├── caxa3dCXDFTViewUpdate/      含 CRX 桥子工程（C++, caxa3dCXDFTViewUpdate.crx）
     ├── caxa3didcskill/            系统工具列启动器（拉起 tools 里的 EXE）
-    └── caxa3dexbTechSpecsbak/     工程图技术要求备份（系统工具列，纯文件 + 注册表操作）
+    ├── caxa3dEbxTechSpecsBackup/  工程图技术要求备份启动器（拉起 tools 里的独立 EXE）
+    └── caxa3dToolboxBackup/       自定义设计库备份启动器（拉起 tools 里的独立 EXE）
 
 tools/
-└── caxa3didcskill/              独立 EXE：后台进程清理（随包部署到 plugins\caxa3didcskill\）
+├── caxa3didcskill/              独立 EXE：后台进程清理（随包部署到 plugins\caxa3didcskill\）
+├── caxa3dEbxTechSpecsBackup/    独立 EXE：工程图技术要求备份（随包部署到 plugins\caxa3dEbxTechSpecsBackup\）
+└── caxa3dToolboxBackup/         独立 EXE：自定义设计库备份（随包部署到 plugins\caxa3dToolboxBackup\）
 ```
 
 运行期布局：
@@ -83,7 +87,9 @@ C:\Program Files\CAXA\CAXA 3D\<年份>\bin\
 ├── caxa3dmytoolsaddin.dll         主程序（内嵌 SxS 清单，强名称签名）
 ├── caxa3dMyTools.Contracts.dll    契约
 └── caxa3dmytoolsaddin\plugins\<插件名>\<插件名>.dll
-    └── caxa3didcskill\   caxa3didcskill.dll（启动器）+ caxa3didcskill.exe（进程外工具）
+    ├── caxa3didcskill\             caxa3didcskill.dll（启动器）+ caxa3didcskill.exe（进程外工具）
+    ├── caxa3dEbxTechSpecsBackup\   caxa3dEbxTechSpecsBackup.dll（启动器）+ .exe（进程外工具）
+    └── caxa3dToolboxBackup\        caxa3dToolboxBackup.dll（启动器）+ .exe（进程外工具）
 ```
 
 ---
@@ -121,7 +127,7 @@ plugins\<每个插件>\Lib\ICApiAddin.snk
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-流程：契约 -> 独立工具 EXE（`tools\caxa3didcskill`）-> 10 个子插件 -> 主程序 -> 清理并重建 `src/plugins/` 暂存目录（独立插件目录里同时落 DLL 与 EXE）。
+流程：契约 -> 独立工具 EXE（`tools\caxa3didcskill`、`tools\caxa3dEbxTechSpecsBackup`、`tools\caxa3dToolboxBackup`）-> 11 个子插件 -> 主程序 -> 清理并重建 `src/plugins/` 暂存目录（启动器插件目录里同时落 DLL 与 EXE）。
 
 编译后处理（自动）：主程序剥离 interop 的 `clrClass/clrSurrogate`、重新嵌入清单、`sn -R` 重签；子插件**不做**任何清单处理。
 

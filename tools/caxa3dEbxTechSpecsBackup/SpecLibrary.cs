@@ -1,4 +1,4 @@
-// 图纸环境「个人技术要求」库（NSpecLib.xml）的定位、按年份分组、备份与还原。
+﻿// 图纸环境「个人技术要求」库（NSpecLib.xml）的定位、按年份分组、备份与还原。
 //
 // 背景（已实测，勿凭记忆改）：
 //   · CAXA 安装目录下的 NSpecLib.xml 是**共享/内置库**（Program Files\CAXA\CAXA 3D\<年>\bin\CAXADraft\Data\zh-CN），
@@ -23,7 +23,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
-namespace caxa3dexbTechSpecsbak
+namespace caxa3dEbxTechSpecsBackup
 {
     /// <summary>一份个人技术要求库副本（按年份归属）。</summary>
     internal sealed class SpecItem
@@ -107,7 +107,7 @@ namespace caxa3dexbTechSpecsbak
     internal static class SpecLibrary
     {
         internal const string FileName = "NSpecLib.xml";
-        internal const string ToolId = "caxa3dexbTechSpecsbak";
+        internal const string ToolId = "caxa3dEbxTechSpecsBackup";
         internal const string ManifestName = "manifest.txt";
 
         private static readonly Regex FamilyPattern = new Regex(@"^CAXA\s+(CAD|3D)", RegexOptions.IgnoreCase);

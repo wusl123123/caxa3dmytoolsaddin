@@ -33,9 +33,19 @@ $contracts = Join-Path $root 'src\Contracts\Contracts.csproj'
 $hostProj  = Join-Path $root 'src\Host\caxa3dmytoolsaddin.csproj'
 $stage     = Join-Path $root 'src\plugins'
 
-# 独立工具（进程外 EXE，规则 16.6）：由「独立插件」列的启动器 DLL 拉起，随安装包一起部署
+# 独立工具（进程外 EXE，规则 16.6）：由启动器 DLL 拉起，随安装包一起部署
 $idcToolProj = Join-Path $root 'tools\caxa3didcskill\caxa3didcskill.csproj'
 $idcToolExe  = Join-Path $root 'tools\caxa3didcskill\bin\x64\Release\net48\caxa3didcskill.exe'
+# 2026-11-19：两个备份工具由进程内业务子插件转制为独立 EXE
+$toolboxToolProj = Join-Path $root 'tools\caxa3dToolboxBackup\caxa3dToolboxBackup.csproj'
+$toolboxToolExe  = Join-Path $root 'tools\caxa3dToolboxBackup\bin\x64\Release\net48\caxa3dToolboxBackup.exe'
+$specsToolProj   = Join-Path $root 'tools\caxa3dEbxTechSpecsBackup\caxa3dEbxTechSpecsBackup.csproj'
+$specsToolExe    = Join-Path $root 'tools\caxa3dEbxTechSpecsBackup\bin\x64\Release\net48\caxa3dEbxTechSpecsBackup.exe'
+# 标准件库 XML 编辑器（系统工具列）：源码是仓库外的兄弟工程 caxa3dtoolboxmaker（单一来源），
+# 本仓库只放启动器 DLL；编译外部工程后把 EXE 拷进启动器目录随包部署
+$makerToolRoot = Join-Path $root '..\caxa3dtoolboxmaker'
+$makerToolProj = Join-Path $makerToolRoot 'caxa3dtoolboxmaker.csproj'
+$makerToolExe  = Join-Path $makerToolRoot 'bin\x64\Release\net48\caxa3dtoolboxmaker.exe'
 
 # 子插件：项目文件 + 暂存目录名（与插件 Id 一致）
 # ★ 2026-11-13 预热铁律（AGENTS 第 5 节）：预热载体 .exb 只随 Host 输出走，
@@ -65,18 +75,24 @@ $plugins = @(
     # 折弯管理大师：需带使用说明 .txt
     @{ Name = 'caxa3dsheetmaster';           Project = (Join-Path $root 'plugins\caxa3dsheetmaster\caxa3dsheetmaster.csproj');
        Extra = @('.txt') },
-    # 工程图技术要求备份（系统工具列）：纯文件 + 注册表操作，无自带资源，只有 DLL
-    @{ Name = 'caxa3dexbTechSpecsbak';       Project = (Join-Path $root 'plugins\caxa3dexbTechSpecsbak\caxa3dexbTechSpecsbak.csproj') },
-    # 自定义设计库备份（系统工具列，2026-11-17 由独立 Add-in caxa3dmytoolboxbak 移植）：
-    # 纯文件级备份/还原 %LOCALAPPDATA%\CAXA\CAXA 3D\<版本>\<语言>\ToolBox，无自带资源，只有 DLL
-    @{ Name = 'caxa3dmytoolboxbak';          Project = (Join-Path $root 'plugins\caxa3dmytoolboxbak\caxa3dmytoolboxbak.csproj') },
+    # 工程图技术要求备份（系统工具列）：2026-11-19 由进程内业务子插件转制为「启动器 DLL + 独立 EXE」，
+    # 业务逻辑在 tools\caxa3dEbxTechSpecsBackup，进程外读写 NSpecLib.xml
+    @{ Name = 'caxa3dEbxTechSpecsBackup';    Project = (Join-Path $root 'plugins\caxa3dEbxTechSpecsBackup\caxa3dEbxTechSpecsBackup.csproj');
+       Extra = @('.exe'); ExtraSrc = @($specsToolExe) },
+    # 自定义设计库备份（系统工具列）：同上，业务逻辑在 tools\caxa3dToolboxBackup，进程外读写 ToolBox 目录
+    @{ Name = 'caxa3dToolboxBackup';         Project = (Join-Path $root 'plugins\caxa3dToolboxBackup\caxa3dToolboxBackup.csproj');
+       Extra = @('.exe'); ExtraSrc = @($toolboxToolExe) },
     # 批量大师（常用列）：需带默认属性表格 .xlsx、两张用户规则 .txt、图纸环境 CRX 桥
     # caxa3dBatchMasterView.crx（第 5 登记点，缺它「刷新工程图」整链不可用）；预热 .exb 已上收 Host
     @{ Name = 'caxa3dBatchMaster';           Project = (Join-Path $root 'plugins\caxa3dBatchMaster\caxa3dBatchMaster.csproj');
        Extra = @('.txt', '.crx') },
     # 后台进程清理（独立插件列）：DLL 只是启动器，真正干活的是随包部署的 caxa3didcskill.exe
     @{ Name = 'caxa3didcskill';              Project = (Join-Path $root 'plugins\caxa3didcskill\caxa3didcskill.csproj');
-       Extra = @('.exe'); ExtraSrc = @($idcToolExe) }
+       Extra = @('.exe'); ExtraSrc = @($idcToolExe) },
+    # 标准件库 XML 编辑器（系统工具列）：源码在仓库外兄弟工程 caxa3dtoolboxmaker，
+    # 启动器 DLL + 独立 EXE，编译外部工程后把 EXE 拷进启动器目录随包部署
+    @{ Name = 'caxa3dtoolboxmaker';          Project = (Join-Path $root 'plugins\caxa3dtoolboxmaker\caxa3dtoolboxmaker.csproj');
+       Extra = @('.exe'); ExtraSrc = @($makerToolExe) }
 )
 
 function Build-Project([string]$project) {
@@ -89,6 +105,10 @@ function Build-Project([string]$project) {
 Build-Project $contracts
 # 先编译独立工具 EXE：启动器插件编译后会把 EXE 一起拷进自己的输出目录
 Build-Project $idcToolProj
+Build-Project $toolboxToolProj
+Build-Project $specsToolProj
+# 外部兄弟工程：标准件库 XML 编辑器的真正 EXE（本仓库只有启动器 DLL）
+Build-Project $makerToolProj
 foreach ($p in $plugins) { Build-Project $p.Project }
 Build-Project $hostProj
 
@@ -128,4 +148,7 @@ Write-Host "编译与暂存完成。" -ForegroundColor Green
 Write-Host "  Host : $(Join-Path $root 'src\Host\bin\x64\Release\net48\caxa3dmytoolsaddin.dll')"
 Write-Host "  插件 : $stage"
 Write-Host "  独立工具 : $idcToolExe -> $(Join-Path $stage 'caxa3didcskill')"
+Write-Host "  独立工具 : $toolboxToolExe -> $(Join-Path $stage 'caxa3dToolboxBackup')"
+Write-Host "  独立工具 : $specsToolExe -> $(Join-Path $stage 'caxa3dEbxTechSpecsBackup')"
+Write-Host "  独立工具 : $makerToolExe -> $(Join-Path $stage 'caxa3dtoolboxmaker')"
 Write-Host "安装 : 运行仓库根目录的 安装.bat；卸载：运行 卸载.bat；打包：运行 打包.bat"

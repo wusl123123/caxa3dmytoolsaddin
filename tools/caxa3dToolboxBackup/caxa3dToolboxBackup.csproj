@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      独立进程版「自定义设计库备份」工具（原先作为 toolsaddin 的业务子插件运行在 CAXA 进程内，
+      2026-11-19 转制为独立 EXE：进程外读写 ToolBox 目录，不引用 ICAPI、不依赖 CAXA 宿主）。
+      Host 侧只保留 plugins\caxa3dToolboxBackup 的启动器 DLL。
+    -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>caxa3dToolboxBackup</RootNamespace>
+    <AssemblyName>caxa3dToolboxBackup</AssemblyName>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <Version>1.0.0.0</Version>
+    <Product>caxa3dToolboxBackup</Product>
+    <AssemblyTitle>CAXA 3D 自定义设计库备份（独立 EXE）</AssemblyTitle>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+  </PropertyGroup>
+
+  <!-- 无 Visual Studio 的机器上也能用 dotnet build 编译 net48 -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
+      <PrivateAssets>All</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- 备份包读写（ZipArchive）；注册表走 Microsoft.Win32（无需额外引用） -->
+  <ItemGroup>
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+</Project>

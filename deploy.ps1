@@ -364,9 +364,12 @@ function Get-CaxaVersionDirs {
 # LoadFrom 返回的是已加载那份（同为 1.0.0.0 / PKT 56647e1eee90f6d4）⇒ 工具箱静默缺席。
 # 2026-11-09 补入 caxa3dButton：按钮工具移植为子插件，独立 Add-in 若仍登记会与集合体重复弹窗。
 # 2026-11-17 补入 caxa3dmytoolboxbak：设计库备份移植为子插件（系统工具列），同上撤销独立登记。
-$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll', 'caxa3ddiffrename.dll', 'caxa3dmytoolboxbak.dll')
-$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton', 'caxa3ddiffrename', 'caxa3dmytoolboxbak')
-$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}', '{6E2015C2-DBF7-47E7-BC12-B3EA50738B85}', '{55922617-DA1C-4C13-9513-D017B15AE591}')
+# 2026-11-19 补入 caxa3dexbTechSpecsbak：技术要求备份同样早已并入集合体，其独立登记必须一并撤销
+#            （两个备份工具本轮再转制为「启动器 DLL + 独立 EXE」，插件 Id 改用 caxa3dToolboxBackup /
+#             caxa3dEbxTechSpecsBackup；上面这两个旧名仍留在 legacy 表里，用来清掉历史独立安装）。
+$legacyDlls   = @('caxa3dAttributeManageraddin.dll', 'Caxa3dcudeaddin.dll', 'caxa3dcodenameextraction.dll', 'caxa3dsetMaterial.dll', 'caxa3dTreeBom.dll', 'caxa3dminitool.dll', 'caxa3dsheetmaster.dll', 'caxa3dCXDFTViewUpdate.dll', 'caxa3dBatchMaster.dll', 'caxa3dButton.dll', 'caxa3ddiffrename.dll', 'caxa3dmytoolboxbak.dll', 'caxa3dexbTechSpecsbak.dll')
+$legacyNames  = @('caxa3dAttributeManageraddin', 'Caxa3dcudeaddin', 'caxa3dcodenameextraction', 'caxa3dsetMaterial', 'caxa3dTreeBom', 'caxa3dminitool', 'caxa3dsheetmaster', 'caxa3dCXDFTViewUpdate', 'caxa3dBatchMaster', 'caxa3dButton', 'caxa3ddiffrename', 'caxa3dmytoolboxbak', 'caxa3dexbTechSpecsbak')
+$legacyClsids = @('{82B0A784-9822-4009-B83B-4AD63D6D2A88}', '{B3246FE6-6C06-446C-8A43-582D4C9690F9}', '{3B7D9E21-6C4A-4F2B-B8D5-7A1C9E3F5A62}', '{C4B2A6E7-9D31-4F58-B0A2-7E5C1D8F3A64}', '{2F6C8B41-9D34-4E52-9A7B-6C1D0E3A58F2}', '{9B5E3D71-4A2C-4F86-8E19-3C7D0B2A6F54}', '{7A3F9C21-5B4E-4D86-9E0A-3C1B7D5F2E48}', '{C9F5A7B3-6D4E-4F8A-AB1C-3E4D5F6A7B8C}', '{1EA4F316-3B4A-40E9-8D9D-F0448CD20EC3}', '{312A0188-9E53-4AFA-88E4-F1588D671EFB}', '{6E2015C2-DBF7-47E7-BC12-B3EA50738B85}', '{55922617-DA1C-4C13-9513-D017B15AE591}', '{E86F4EEE-F74B-4320-A54B-CA56121E7E01}')
 
 # 已移出集合体的图纸环境 CRX 桥：部署时清掉 CAXADraft\bin 旧文件与 CxAutorun.cx 旧登记行
 # caxa3dcodenameextraction.crx 是子插件改名前（与独立插件同名化）的旧桥，必须连登记行一起清（坑 168）
@@ -976,32 +979,41 @@ foreach ($v in $versions) {
         }
     }
 
-    # ---------- 3d. 「2. 系统工具」列的后台进程清理工具 ----------
-    # 启动器 DLL 和工具 EXE 都放在 plugins\caxa3didcskill\ 里，[3/5] 已整目录拷贝；
-    # 这里只做校验 + 清理早期手工散放在 bin 根目录的旧 EXE（避免两份 EXE 各自为政）。
-    $idcDll = Join-Path (Join-Path $pluginDst $idcPluginName) "$idcPluginName.dll"
-    $idcExe = Join-Path (Join-Path $pluginDst $idcPluginName) $idcExeName
-    if ((Test-Path $idcDll) -and (Test-Path $idcExe)) {
-        Write-Host "[3c/5] 独立插件已就位：$idcPluginName（启动器 DLL + $idcExeName）"
-    } else {
-        Write-Host "[3c/5] [错误] 独立插件不完整：DLL=$(Test-Path $idcDll) EXE=$(Test-Path $idcExe)" -ForegroundColor Red
-        Write-Host "        请先运行 build.ps1（需先编译 tools\caxa3didcskill 才能产出 EXE）。" -ForegroundColor Yellow
-        $hadError = $true
-    }
-    $idcLoose = Join-Path $caxaBin $idcExeName
-    if (Test-Path $idcLoose) {
-        try {
-            Remove-Item $idcLoose -Force -ErrorAction Stop
-            Write-Host "      已清除 bin 根目录的旧 $idcExeName（统一走 plugins\$idcPluginName）"
-        } catch {
-            # 旧 EXE 正在运行时先结束它（只清理 IRONCAD 后台进程，不影响 CAXA），再删一次
+    # ---------- 3d. 「2. 系统工具」列的外部工具启动器（启动器 DLL + 工具 EXE） ----------
+    # 启动器 DLL 和工具 EXE 都放在 plugins\<插件名>\ 里，[3/5] 已整目录拷贝；
+    # 这里逐个校验组合是否完整，并清掉早期手工散放在 bin 根目录的旧 EXE（避免两份 EXE 各自为政）。
+    # 2026-11-19：自定义设计库备份 / 工程图技术要求备份 由进程内业务子插件转制为「启动器 DLL + 独立 EXE」。
+    $launcherItems = @(
+        @{ Name = $idcPluginName;              Exe = $idcExeName },
+        @{ Name = 'caxa3dToolboxBackup';       Exe = 'caxa3dToolboxBackup.exe' },
+        @{ Name = 'caxa3dEbxTechSpecsBackup';  Exe = 'caxa3dEbxTechSpecsBackup.exe' },
+        @{ Name = 'caxa3dtoolboxmaker';        Exe = 'caxa3dtoolboxmaker.exe' }
+    )
+    foreach ($item in $launcherItems) {
+        $itemBase = [IO.Path]::GetFileNameWithoutExtension($item.Exe)
+        $lDll = Join-Path (Join-Path $pluginDst $item.Name) ($item.Name + '.dll')
+        $lExe = Join-Path (Join-Path $pluginDst $item.Name) $item.Exe
+        if ((Test-Path $lDll) -and (Test-Path $lExe)) {
+            Write-Host "[3c/5] 独立工具已就位：$($item.Name)（启动器 DLL + $($item.Exe)）"
+        } else {
+            Write-Host "[3c/5] [错误] 独立工具不完整：$($item.Name) DLL=$(Test-Path $lDll) EXE=$(Test-Path $lExe)" -ForegroundColor Red
+            Write-Host "        请先运行 build.ps1（需先编译 tools\$itemBase 才能产出 EXE）。" -ForegroundColor Yellow
+            $hadError = $true
+        }
+        $loose = Join-Path $caxaBin $item.Exe
+        if (Test-Path $loose) {
             try {
-                Stop-Process -Name 'caxa3didcskill' -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Milliseconds 300
-                Remove-Item $idcLoose -Force -ErrorAction Stop
-                Write-Host "      已结束旧 $idcExeName 进程并删除文件"
+                Remove-Item $loose -Force -ErrorAction Stop
+                Write-Host "      已清除 bin 根目录的旧 $($item.Exe)（统一走 plugins\$($item.Name)）"
             } catch {
-                Write-Host "      警告：旧 $idcExeName 删除失败（被占用）" -ForegroundColor Yellow
+                try {
+                    Stop-Process -Name $itemBase -Force -ErrorAction SilentlyContinue
+                    Start-Sleep -Milliseconds 300
+                    Remove-Item $loose -Force -ErrorAction Stop
+                    Write-Host "      已结束旧 $($item.Exe) 进程并删除文件"
+                } catch {
+                    Write-Host "      警告：旧 $($item.Exe) 删除失败（被占用）" -ForegroundColor Yellow
+                }
             }
         }
     }
@@ -1091,12 +1103,17 @@ foreach ($v in $deployed) {
         $okCrxList += ('{0}={1}/{2}' -f $n, $onBin, $onCx)
         if (-not ($onBin -and $onCx)) { $hadError = $true }
     }
-    $okIdcDll = Test-Path (Join-Path $caxaBin "$hostName\plugins\$idcPluginName\$idcPluginName.dll")
-    $okIdcExe = Test-Path (Join-Path $caxaBin "$hostName\plugins\$idcPluginName\$idcExeName")
-    $okIdcLoose = -not (Test-Path (Join-Path $caxaBin $idcExeName))
+    $okLauncherParts = @()
+    foreach ($item in $launcherItems) {
+        $lDll = Test-Path (Join-Path $caxaBin "$hostName\plugins\$($item.Name)\$($item.Name).dll")
+        $lExe = Test-Path (Join-Path $caxaBin "$hostName\plugins\$($item.Name)\$($item.Exe)")
+        $looseGone = -not (Test-Path (Join-Path $caxaBin $item.Exe))
+        $okLauncherParts += ('{0}:{1}/{2}/{3}' -f $item.Name, $lDll, $lExe, $looseGone)
+        if (-not ($lDll -and $lExe -and $looseGone)) { $hadError = $true }
+    }
 
-    Write-Host ("CAXA 3D {0}: DLL={1} config={2} manifest={3} registry={4} 预热载体={5} 子插件无exb={6} CxXml={7} CRX={8} 独立插件={9}/{10} 无散放EXE={11}" -f $v.Name, $okFile, $okCfg, $okDep, $okReg, $okWarmExb, $okNoPluginExb, $okCxXml, ($okCrxList -join ' '), $okIdcDll, $okIdcExe, $okIdcLoose)
-    if (-not ($okFile -and $okCfg -and $okDep -and $okReg -and $okWarmExb -and $okNoPluginExb -and $okCxXml -and $okIdcDll -and $okIdcExe -and $okIdcLoose)) { $hadError = $true }
+    Write-Host ("CAXA 3D {0}: DLL={1} config={2} manifest={3} registry={4} 预热载体={5} 子插件无exb={6} CxXml={7} CRX={8} 独立工具(DLL/EXE/无散放)={9}" -f $v.Name, $okFile, $okCfg, $okDep, $okReg, $okWarmExb, $okNoPluginExb, $okCxXml, ($okCrxList -join ' '), ($okLauncherParts -join ' '))
+    if (-not ($okFile -and $okCfg -and $okDep -and $okReg -and $okWarmExb -and $okNoPluginExb -and $okCxXml)) { $hadError = $true }
 }
 
 Write-Host ""

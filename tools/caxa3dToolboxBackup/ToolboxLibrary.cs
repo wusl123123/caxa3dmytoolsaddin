@@ -1,4 +1,4 @@
-// CAXA 3D 用户自定义设计库（ToolBox 目录）的定位、按版本分组、目录级备份与还原。
+﻿// CAXA 3D 用户自定义设计库（ToolBox 目录）的定位、按版本分组、目录级备份与还原。
 //
 // 背景（2026-11-16 本机实测）：
 //   用户自定义设计库是一个【目录】而非单文件，真实落点：
@@ -22,7 +22,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
-namespace caxa3dmytoolboxbak
+namespace caxa3dToolboxBackup
 {
     /// <summary>一份本机 ToolBox 目录（按版本号归属）。</summary>
     internal sealed class ToolItem
@@ -110,7 +110,7 @@ namespace caxa3dmytoolboxbak
     internal static class ToolboxLibrary
     {
         internal const string DirName = "ToolBox";
-        internal const string ToolId = "caxa3dmytoolboxbak";
+        internal const string ToolId = "caxa3dToolboxBackup";
         internal const string ManifestName = "manifest.txt";
 
         private static readonly Regex FamilyPattern = new Regex(@"^CAXA\s+3D", RegexOptions.IgnoreCase);

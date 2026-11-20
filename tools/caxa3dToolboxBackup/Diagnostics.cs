@@ -1,17 +1,17 @@
-// 诊断日志模板：%TEMP%\<项目名>_trace.log
+﻿// 诊断日志模板：%TEMP%\<项目名>_trace.log
 // 规则：加载时清空；高频路径 10s 节流；关键判据必须写文件（步骤类只进 UI）；线程安全。
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
-namespace caxa3dmytoolboxbak
+namespace caxa3dToolboxBackup
 {
     internal static class Diagnostics
     {
         private static readonly object _lock = new object();
         private static readonly string _logPath =
-            Path.Combine(Path.GetTempPath(), "caxa3dmytoolboxbak_trace.log");
+            Path.Combine(Path.GetTempPath(), "caxa3dToolboxBackup_trace.log");
 
         private static readonly Dictionary<string, DateTime> _throttle =
             new Dictionary<string, DateTime>(StringComparer.Ordinal);
@@ -30,7 +30,7 @@ namespace caxa3dmytoolboxbak
                 {
                     if (File.Exists(_logPath)) File.Delete(_logPath);
                     // 用 WriteAllText + 带 BOM 编码：新建文件即落 EF BB BF 三字节
-                    File.WriteAllText(_logPath, "== caxa3dmytoolboxbak trace " +
+                    File.WriteAllText(_logPath, "== caxa3dToolboxBackup trace " +
                         DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " ==\r\n", _utf8Bom);
                 }
             }

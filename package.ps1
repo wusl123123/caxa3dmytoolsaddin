@@ -90,18 +90,27 @@ if ($missing.Count -gt 0) {
 }
 Write-Host ("缺件校验通过：{0} 个插件工程已全部暂存" -f $pluginDirs.Count) -ForegroundColor Green
 
-# ---------- 独立插件（后台进程清理）缺件校验 ----------
-# 「2. 独立插件」列 = 启动器 DLL + 进程外工具 EXE；少了 EXE 时界面照样有按钮，
+# ---------- 独立工具（启动器 DLL + 进程外 EXE）缺件校验 ----------
+# 这三个插件都是「启动器 DLL + 进程外工具 EXE」：少了 EXE 时界面照样有按钮，
 # 但点击必定报错 —— 与其上线后才发现，不如打包时直接中止。
-$idcDir = Join-Path $pluginSrc 'caxa3didcskill'
-foreach ($pair in @(
-        @{ Name = 'caxa3didcskill.dll'; Path = (Join-Path $idcDir 'caxa3didcskill.dll') },
-        @{ Name = 'caxa3didcskill.exe'; Path = (Join-Path $idcDir 'caxa3didcskill.exe') })) {
-    if (-not (Test-Path $pair.Path)) {
-        throw ("打包中止：独立插件缺少 {0}（先编译 tools\caxa3didcskill 并重跑 build.ps1）：{1}" -f $pair.Name, $pair.Path)
+# 2026-11-19：caxa3dToolboxBackup / caxa3dEbxTechSpecsBackup 由进程内业务子插件转制而来。
+$launcherTools = @(
+    @{ Name = 'caxa3didcskill';             Exe = 'caxa3didcskill.exe';             Tool = 'tools\caxa3didcskill' },
+    @{ Name = 'caxa3dToolboxBackup';        Exe = 'caxa3dToolboxBackup.exe';        Tool = 'tools\caxa3dToolboxBackup' },
+    @{ Name = 'caxa3dEbxTechSpecsBackup';   Exe = 'caxa3dEbxTechSpecsBackup.exe';   Tool = 'tools\caxa3dEbxTechSpecsBackup' },
+    @{ Name = 'caxa3dtoolboxmaker';         Exe = 'caxa3dtoolboxmaker.exe';         Tool = '..\caxa3dtoolboxmaker（仓库外兄弟工程）' }
+)
+foreach ($t in $launcherTools) {
+    $dir = Join-Path $pluginSrc $t.Name
+    foreach ($pair in @(
+            @{ Name = ($t.Name + '.dll'); Path = (Join-Path $dir ($t.Name + '.dll')) },
+            @{ Name = $t.Exe;             Path = (Join-Path $dir $t.Exe) })) {
+        if (-not (Test-Path $pair.Path)) {
+            throw ("打包中止：启动器插件缺少 {0}（先编译 {1} 并重跑 build.ps1）：{2}" -f $pair.Name, $t.Tool, $pair.Path)
+        }
     }
 }
-Write-Host "缺件校验通过：独立插件 caxa3didcskill（启动器 DLL + 工具 EXE）" -ForegroundColor Green
+Write-Host ("缺件校验通过：{0} 个启动器插件（启动器 DLL + 工具 EXE）" -f $launcherTools.Count) -ForegroundColor Green
 
 # ---------- 插件自带资源缺件校验（不算扩展名白名单，逐个点名） ----------
 # 预热 .exb 已于 2026-11-13 从本表移除：它现在归 Host，放在交付件根目录（见校验 A/C）。
@@ -222,8 +231,12 @@ CAXA 环境配置包（2027环境配置.ucex）
 说明
   - 本目录所有 .ps1 必须保持单个 UTF-8 BOM（bat 已自动校正）
   - 子插件放在 plugins\<插件名>\ 下，主程序启动时自动扫描加载
-  - 「2. 独立插件」列的后台进程清理是进程外工具：plugins\caxa3didcskill\caxa3didcskill.exe，
-    点击后以独立进程运行，只清理无可见窗口的 IRONCAD 残留进程（不杀带窗口的前台实例）
+  - 「2. 系统工具」列的后台进程清理/自定义设计库备份/工程图技术要求备份都是进程外工具：
+    plugins\caxa3didcskill\caxa3didcskill.exe
+    plugins\caxa3dToolboxBackup\caxa3dToolboxBackup.exe
+    plugins\caxa3dEbxTechSpecsBackup\caxa3dEbxTechSpecsBackup.exe
+    plugins\caxa3dtoolboxmaker\caxa3dtoolboxmaker.exe
+    点击后以独立进程运行；两个备份工具与 XML 编辑器也可直接双击 EXE 运行（不依赖 CAXA 宿主）
 "@
 [IO.File]::WriteAllText((Join-Path $stage 'README.txt'), $readme, (New-Object System.Text.UTF8Encoding($true)))
 
@@ -262,7 +275,10 @@ Write-Host "交付内容（解压后）："
 Write-Host "  caxa3dmytoolsaddin.dll / Caxa3dMyTools.Contracts.dll / $warmExbName"
 Write-Host "  2027环境配置.ucex（★ 用户自行加载，安装脚本不处理）"
 Write-Host "  plugins\<插件名>\<插件名>.dll  (+ 插件自带资源，不含预热 .exb)"
-Write-Host "  plugins\caxa3didcskill\caxa3didcskill.exe  (独立插件列的后台进程清理工具)"
+Write-Host "  plugins\caxa3didcskill\caxa3didcskill.exe  (系统工具列的后台进程清理工具)"
+Write-Host "  plugins\caxa3dToolboxBackup\caxa3dToolboxBackup.exe  (自定义设计库备份工具)"
+Write-Host "  plugins\caxa3dEbxTechSpecsBackup\caxa3dEbxTechSpecsBackup.exe  (工程图技术要求备份工具)"
+Write-Host "  plugins\caxa3dtoolboxmaker\caxa3dtoolboxmaker.exe  (标准件库 XML 编辑器)"
 Write-Host "  deploy.ps1 / restore.ps1 / 安装.bat / 卸载.bat / README.txt"
 Write-Host ""
 Write-Host "下一步：自行运行 安装.bat（编译/打包不会自动安装插件）。" -ForegroundColor Cyan

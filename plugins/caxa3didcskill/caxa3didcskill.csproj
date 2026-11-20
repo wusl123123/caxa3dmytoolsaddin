@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <!--
-      独立插件列的外部工具启动器（DLL），真正的业务逻辑在 tools\caxa3didcskill 的
-      caxa3didcskill.exe 里（进程外执行，规则 16.6）。
+      独立工具启动器（DLL）。真正的业务逻辑在 tools\caxa3didcskill 的
+      caxa3didcskill.exe 里（进程外执行，规则 16.6：进程清理只能在进程外做）。
       本工程不引用 interop.ICApiIronCAD：启动器不碰任何 CAXA 类型。
     -->
     <OutputType>Library</OutputType>
@@ -13,17 +13,15 @@
     <AssemblyName>caxa3didcskill</AssemblyName>
     <LangVersion>10.0</LangVersion>
     <Nullable>disable</Nullable>
-    <!-- CAXA 3D 均为 64 位进程，插件 DLL 必须 x64 -->
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
-    <!-- 与 Host / 其余插件同一密钥（publicKeyToken = 56647e1eee90f6d4） -->
     <AssemblyOriginatorKeyFile>..\..\Lib\ICApiAddin.snk</AssemblyOriginatorKeyFile>
     <SignAssembly>true</SignAssembly>
     <DelaySign>false</DelaySign>
     <Version>1.0.0.0</Version>
     <Product>caxa3didcskill</Product>
-    <AssemblyTitle>CAXA 3D 后台进程清理（独立插件启动器）</AssemblyTitle>
+    <AssemblyTitle>后台进程清理（独立插件启动器）</AssemblyTitle>
     <FileVersion>1.0.0.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
   </PropertyGroup>

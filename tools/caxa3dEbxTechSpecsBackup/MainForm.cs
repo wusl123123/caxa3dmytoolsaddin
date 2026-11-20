@@ -1,4 +1,4 @@
-// 主窗口：窗口前置 + 刷新列表 + 全选/全不选 + 备份 + 还原 + 停止 + 保存/清理日志
+﻿// 主窗口：窗口前置 + 刷新列表 + 全选/全不选 + 备份 + 还原 + 停止 + 保存/清理日志
 //
 // 铁律：
 //  - 所有按钮文字纯汉字，禁用 emoji / 符号 / 图标
@@ -18,9 +18,8 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
-using interop.ICApiIronCAD;
 
-namespace caxa3dexbTechSpecsbak
+namespace caxa3dEbxTechSpecsBackup
 {
     [System.Runtime.InteropServices.ComVisible(false)]
     public class MainForm : Form
@@ -28,7 +27,6 @@ namespace caxa3dexbTechSpecsbak
         private static volatile bool _running;
         private static volatile bool _stopRequested;
 
-        private readonly IZBaseApp _app;
         private readonly TextBox _log = new TextBox();
         private readonly CheckedListBox _list = new CheckedListBox();
         private readonly ContextMenuStrip _menu = new ContextMenuStrip();
@@ -46,16 +44,8 @@ namespace caxa3dexbTechSpecsbak
 
         private List<SpecItem> _items = new List<SpecItem>();
 
-        // ↓↓↓ 键盘归属抢救：Ctrl+C/V/X/A/Z 归本窗口自己的文本框（机理/开关/取证见 Caxa3dMyTools.Contracts.ChordRescue）
-        protected override void OnActivated(EventArgs e) { base.OnActivated(e); Caxa3dMyTools.Contracts.ChordRescue.Install(this, msg => Diagnostics.Log(msg)); }
-        protected override void OnDeactivate(EventArgs e) { base.OnDeactivate(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口失活"); }
-        protected override void OnFormClosed(FormClosedEventArgs e) { base.OnFormClosed(e); Caxa3dMyTools.Contracts.ChordRescue.Uninstall(this, "窗口关闭"); }
-        protected override void WndProc(ref Message m) { if (Caxa3dMyTools.Contracts.ChordRescue.Route(this, ref m)) return; base.WndProc(ref m); }
-        // ↑↑↑
-
-        public MainForm(IZBaseApp app)
+        public MainForm()
         {
-            _app = app;
             Diagnostics.Reset();
             BuildUi();
 

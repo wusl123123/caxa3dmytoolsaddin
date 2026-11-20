@@ -1,14 +1,14 @@
-// 还原前选择版本的小窗：列出备份包里包含的版本库，勾选要还原的那几个（可多选）。
+﻿// 还原前选择年份的小窗：列出备份包里包含的年份库，勾选要还原的那几个（可多选）。
 // 铁律：按钮文字纯汉字；窗口只做选择，不做任何文件写入。
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace caxa3dmytoolboxbak
+namespace caxa3dEbxTechSpecsBackup
 {
     [System.Runtime.InteropServices.ComVisible(false)]
-    internal sealed class VersionPickForm : Form
+    internal sealed class YearPickForm : Form
     {
         private readonly CheckedListBox _list = new CheckedListBox();
         private readonly List<PackEntry> _entries;
@@ -21,7 +21,7 @@ namespace caxa3dmytoolboxbak
         /// <summary>用户勾选的条目；取消时为空列表。</summary>
         public List<PackEntry> Selected { get; private set; }
 
-        public VersionPickForm(List<PackEntry> entries, string zipPath, string created)
+        public YearPickForm(List<PackEntry> entries, string zipPath, string created)
         {
             _entries = entries ?? new List<PackEntry>();
             Selected = new List<PackEntry>();
@@ -30,7 +30,7 @@ namespace caxa3dmytoolboxbak
 
         private void BuildUi(string zipPath, string created)
         {
-            Text = "选择要还原的版本";
+            Text = "选择要还原的年份";
             ClientSize = new Size(660, 380);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -39,7 +39,7 @@ namespace caxa3dmytoolboxbak
             ShowInTaskbar = false;
 
             _info.SetBounds(12, 10, 636, 38);
-            _info.Text = "备份包：" + zipPath + "\r\n制作时间：" + created + "　　共 " + _entries.Count + " 个版本库";
+            _info.Text = "备份包：" + zipPath + "\r\n制作时间：" + created + "　　共 " + _entries.Count + " 个年份库";
 
             _list.SetBounds(12, 52, 636, 264);
             _list.CheckOnClick = true;
@@ -91,7 +91,7 @@ namespace caxa3dmytoolboxbak
             }
             if (Selected.Count == 0)
             {
-                MessageBox.Show(this, "请至少勾选一个版本", "未选择", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, "请至少勾选一个年份", "未选择", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 DialogResult = DialogResult.None;
             }
         }

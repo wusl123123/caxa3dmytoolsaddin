@@ -8,12 +8,10 @@ using Caxa3dMyTools.Contracts;
 namespace caxa3didcskill
 {
     /// <summary>
-    /// 「2. 系统工具」列：外部工具启动器（2026-11-09 由「独立插件」列并入系统工具列）。
+    /// 「2. 系统工具」列：后台进程清理（外部工具启动器）。
     ///
-    /// 定位说明（规则 16.6 / 第 17 节）：
-    ///   进程清理只允许在**进程外**做——工具本体是 caxa3didcskill.exe（独立 WinForms 进程），
-    ///   本类不实现任何清理逻辑、不碰 IRONCAD 进程、不引用 ICAPI、不建窗口、不注册 Ribbon。
-    ///   它只负责「找到 EXE -> 已有实例则前台化，否则启动」，把独立工具接入工具箱界面。
+    /// 进程清理必须脱离 CAXA 宿主执行（规则 16.6）：本类不实现业务逻辑、
+    /// 不引用 ICAPI、不建窗口、不注册 Ribbon，只负责「找到 EXE -> 已有实例则前台化，否则启动」。
     /// </summary>
     public sealed class IdcSkillLauncherPlugin : IPlugin
     {
@@ -29,7 +27,7 @@ namespace caxa3didcskill
 
         public string DisplayName { get { return "后台进程清理"; } }
 
-        /// <summary>独立 EXE/外部进程方式运行，归入「2. 系统工具」列（两列化后 Independent 不再单独设列）。</summary>
+        /// <summary>独立 EXE 方式运行，归入「2. 系统工具」列。</summary>
         public PluginCategory Category { get { return PluginCategory.SystemTool; } }
 
         /// <summary>Host 加载时只做准备：解析 EXE 路径并写日志，绝不启动进程。</summary>
@@ -54,22 +52,22 @@ namespace caxa3didcskill
                     "请重新运行 安装.bat（或 build.ps1 后重新部署）。");
             }
 
-            // 工具自带定时清理，多开会并发清理同一批进程：已有实例只做前台化
+            // 多开会让两份清理流程互相干扰：已有实例只做前台化
             if (ActivateExistingInstance()) return;
 
             ProcessStartInfo psi = new ProcessStartInfo
             {
-                FileName        = _exePath,
+                FileName         = _exePath,
                 WorkingDirectory = Path.GetDirectoryName(_exePath),
-                UseShellExecute = true   // 独立进程、独立身份，不继承 CAXA 的加载上下文
+                UseShellExecute  = true   // 独立进程、独立身份，不继承 CAXA 的加载上下文
             };
             Process.Start(psi);
             Log("已启动独立工具：" + _exePath);
         }
 
         /// <summary>
-        /// Host 卸载时不结束外部进程：用户可能正用它做定时清理，
-        /// 强行结束会把「自动运行」状态一起带走。启动器只解除引用。
+        /// Host 卸载时不结束外部进程：清理流程可能正在跑，强行结束会让用户看不到结果。
+        /// 启动器只解除引用。
         /// </summary>
         public void Shutdown()
         {

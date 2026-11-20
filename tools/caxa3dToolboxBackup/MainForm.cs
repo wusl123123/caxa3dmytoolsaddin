@@ -1,4 +1,4 @@
-// 主窗口：窗口前置 + 刷新列表 + 全选/全不选 + 备份 + 还原 + 停止 + 保存/清理日志
+﻿// 主窗口：窗口前置 + 刷新列表 + 全选/全不选 + 备份 + 还原 + 停止 + 保存/清理日志
 //
 // 铁律：
 //  - 所有按钮文字纯汉字，禁用 emoji / 符号 / 图标
@@ -18,11 +18,10 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
-using interop.ICApiIronCAD;
 
-namespace caxa3dmytoolboxbak
+namespace caxa3dToolboxBackup
 {
-    // OperationStoppedException 统一定义在 CaxaAutomation.cs，此处不再重复声明（否则 CS0101/CS0111）。
+    // OperationStoppedException 统一定义在 StopSignal.cs，此处不再重复声明（否则 CS0101/CS0111）。
 
     [System.Runtime.InteropServices.ComVisible(false)]
     public class MainForm : Form
@@ -30,7 +29,6 @@ namespace caxa3dmytoolboxbak
         private static volatile bool _running;
         private static volatile bool _stopRequested;
 
-        private readonly IZBaseApp _app;
         private readonly TextBox _log = new TextBox();
         private readonly CheckedListBox _list = new CheckedListBox();
         private readonly ContextMenuStrip _menu = new ContextMenuStrip();
@@ -48,9 +46,8 @@ namespace caxa3dmytoolboxbak
 
         private List<ToolItem> _items = new List<ToolItem>();
 
-        public MainForm(IZBaseApp app)
+        public MainForm()
         {
-            _app = app;
             Diagnostics.Reset();
             BuildUi();
 
@@ -359,7 +356,7 @@ namespace caxa3dmytoolboxbak
             using (var dlg = new SaveFileDialog
             {
                 Filter = "设计库备份包|*.zip",
-                FileName = "caxa3dmytoolboxbak-" + stamp + ".zip",
+                FileName = "caxa3dToolboxBackup-" + stamp + ".zip",
                 Title = "选择备份包存放位置",
                 InitialDirectory = Directory.Exists(desktop) ? desktop : ""
             })
