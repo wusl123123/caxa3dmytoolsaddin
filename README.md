@@ -41,10 +41,11 @@ CAXA 3D 内置插件集合体（Add-in Host）与统一工具箱。CAXA 3D 中�
 | `caxa3didcskill` | 后台进程清理 | 系统工具列启动器，拉起进程外的 `caxa3didcskill.exe` 清理无窗口 IRONCAD 残留进程 |
 | `caxa3dEbxTechSpecsBackup` | 工程图技术要求备份 | 系统工具列启动器，拉起进程外的 `caxa3dEbxTechSpecsBackup.exe`：按 CAXA 版本年度备份/还原「我的技术要求」`NSpecLib.xml`，zip 内带清单、逐项 SHA256 校验、还原前自动留 `.bak` |
 | `caxa3dToolboxBackup` | 自定义设计库备份 | 系统工具列启动器，拉起进程外的 `caxa3dToolboxBackup.exe`：备份/还原 `%LOCALAPPDATA%\CAXA\CAXA 3D\<版本>\<语言>\ToolBox` 设计库目录 |
+| `caxa3dtoolboxmaker` | 标准件库XML编辑器 | 系统工具列启动器，拉起进程外的 `caxa3dtoolboxmaker.exe`：编辑标准件库 XML；EXE 源码在仓库外兄弟工程，本仓库只有启动器 DLL |
 
-工具箱窗口按 `IPlugin.Category` 分四列表格排列：`1. 常用插件`（`BuiltIn`，8 个：`caxa3dAttributeManageraddin`、`caxa3ddiffrename`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dButton`、`caxa3dsheetmaster`、`caxa3dBatchMaster`、`caxa3dCXDFTViewUpdate`）、`2. 系统工具`（`SystemTool`，3 个：`caxa3didcskill`、`caxa3dEbxTechSpecsBackup`、`caxa3dToolboxBackup`）；`Independent`、`Test` 两类当前无插件（`caxa3dminitool` 已并入 `caxa3dButton`，测试类 `Caxa3dcudeaddin` / `caxa3dapigetaddin` 已删除）。
+工具箱窗口按 `IPlugin.Category` 分四列表格排列：`1. 常用插件`（`BuiltIn`，8 个：`caxa3dAttributeManageraddin`、`caxa3ddiffrename`、`caxa3dsetMaterial`、`caxa3dTreeBom`、`caxa3dButton`、`caxa3dsheetmaster`、`caxa3dBatchMaster`、`caxa3dCXDFTViewUpdate`）、`2. 系统工具`（`SystemTool`，4 个：`caxa3didcskill`、`caxa3dEbxTechSpecsBackup`、`caxa3dToolboxBackup`、`caxa3dtoolboxmaker`）；`Independent`、`Test` 两类当前无插件（`caxa3dminitool` 已并入 `caxa3dButton`，测试类 `Caxa3dcudeaddin` / `caxa3dapigetaddin` 已删除）。
 
-> 独立工具的形态：`plugins\<插件名>\` 里 DLL 只是**启动器**（不引用 ICAPI、不建窗口、不实现业务逻辑），点单元格时由它启动同目录的 EXE；已有实例则切前台，不重复启动。EXE 源码在 `tools\<插件名>\`，随安装包一起部署到 `plugins\<插件名>\`。`caxa3didcskill` 因进程清理只能在进程外做（规则 16.6）属此形态；2026-11-19 起 `caxa3dToolboxBackup` / `caxa3dEbxTechSpecsBackup` 两个备份工具也由进程内业务子插件转制为同一形态（纯文件/注册表操作，本就不需要 CAXA 宿主，进程外运行更安全；且 EXE 可脱离 CAXA 直接双击运行）。
+> 独立工具的形态：`plugins\<插件名>\` 里 DLL 只是**启动器**（不引用 ICAPI、不建窗口、不实现业务逻辑），点单元格时由它启动同目录的 EXE；已有实例则切前台，不重复启动。EXE 源码通常在 `tools\<插件名>\`，随安装包一起部署到 `plugins\<插件名>\`。`caxa3didcskill` 因进程清理只能在进程外做（规则 16.6）属此形态；2026-11-19 起 `caxa3dToolboxBackup` / `caxa3dEbxTechSpecsBackup` 两个备份工具也由进程内业务子插件转制为同一形态（纯文件/注册表操作，本就不需要 CAXA 宿主，进程外运行更安全；且 EXE 可脱离 CAXA 直接双击运行）。`caxa3dtoolboxmaker` 同属此形态，但 EXE 源码位于**仓库外的兄弟工程** `caxa3dtoolboxmaker\`，编译后拷入启动器目录随包部署；本仓库只有启动器 DLL。
 
 ---
 
@@ -72,12 +73,15 @@ caxa3dmytoolsaddin/
     ├── caxa3dCXDFTViewUpdate/      含 CRX 桥子工程（C++, caxa3dCXDFTViewUpdate.crx）
     ├── caxa3didcskill/            系统工具列启动器（拉起 tools 里的 EXE）
     ├── caxa3dEbxTechSpecsBackup/  工程图技术要求备份启动器（拉起 tools 里的独立 EXE）
-    └── caxa3dToolboxBackup/       自定义设计库备份启动器（拉起 tools 里的独立 EXE）
+    ├── caxa3dToolboxBackup/       自定义设计库备份启动器（拉起 tools 里的独立 EXE）
+    └── caxa3dtoolboxmaker/        标准件库 XML 编辑器启动器（拉起仓库外兄弟工程编译的独立 EXE）
 
 tools/
 ├── caxa3didcskill/              独立 EXE：后台进程清理（随包部署到 plugins\caxa3didcskill\）
 ├── caxa3dEbxTechSpecsBackup/    独立 EXE：工程图技术要求备份（随包部署到 plugins\caxa3dEbxTechSpecsBackup\）
-└── caxa3dToolboxBackup/         独立 EXE：自定义设计库备份（随包部署到 plugins\caxa3dToolboxBackup\）
+└── caxa3dToolboxBackup/         独立 EXE：自定义设计库备份（随包部署到 plugins\caxa3dToolboxBackup\)
+
+（仓库外兄弟工程 caxa3dtoolboxmaker\ 提供标准件库 XML 编辑器 EXE，编译后拷入 plugins\caxa3dtoolboxmaker\）
 ```
 
 运行期布局：
@@ -89,7 +93,8 @@ C:\Program Files\CAXA\CAXA 3D\<年份>\bin\
 └── caxa3dmytoolsaddin\plugins\<插件名>\<插件名>.dll
     ├── caxa3didcskill\             caxa3didcskill.dll（启动器）+ caxa3didcskill.exe（进程外工具）
     ├── caxa3dEbxTechSpecsBackup\   caxa3dEbxTechSpecsBackup.dll（启动器）+ .exe（进程外工具）
-    └── caxa3dToolboxBackup\        caxa3dToolboxBackup.dll（启动器）+ .exe（进程外工具）
+    ├── caxa3dToolboxBackup\        caxa3dToolboxBackup.dll（启动器）+ .exe（进程外工具）
+    └── caxa3dtoolboxmaker\         caxa3dtoolboxmaker.dll（启动器）+ caxa3dtoolboxmaker.exe（进程外工具）
 ```
 
 ---
@@ -127,7 +132,7 @@ plugins\<每个插件>\Lib\ICApiAddin.snk
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-流程：契约 -> 独立工具 EXE（`tools\caxa3didcskill`、`tools\caxa3dEbxTechSpecsBackup`、`tools\caxa3dToolboxBackup`）-> 11 个子插件 -> 主程序 -> 清理并重建 `src/plugins/` 暂存目录（启动器插件目录里同时落 DLL 与 EXE）。
+流程：契约 -> 独立工具 EXE（`tools\caxa3didcskill`、`tools\caxa3dEbxTechSpecsBackup`、`tools\caxa3dToolboxBackup`）-> 仓库外兄弟工程 EXE（`caxa3dtoolboxmaker`）-> 12 个子插件 -> 主程序 -> 清理并重建 `src/plugins/` 暂存目录（启动器插件目录里同时落 DLL 与 EXE）。
 
 编译后处理（自动）：主程序剥离 interop 的 `clrClass/clrSurrogate`、重新嵌入清单、`sn -R` 重签；子插件**不做**任何清单处理。
 
