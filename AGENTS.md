@@ -70,3 +70,18 @@ python gh_api_push.py
 3. **子插件入库禁带**：预热按钮 / 状态灯 / 启动自动预热 / `caxa3d图纸环境预热.exb`（csproj 的 None Include 与 bin/暂存副本一并删除）。发布核对单第 1 条同口径：`git status` 里出现子插件目录的预热 .exb 即打回。
 4. **例外（业务安全兜底，不算预热入口）**：子插件流程内部的按需预热调用可保留——caxa3ddiffrename `WarmUpDrawingEnv(closeRightAway)`（坑 148 防崩：流程内留载体至目标 exb 打开）、BatchMaster `ViewBridge.WarmUpDrawingEnv`（后台线程 + 自有 CRX CLOSERAW）。这些调用不得注册成 UI 按钮、不得在 OnShown/构造期自动触发、不得自带 .exb。
 5. **载体部署**：exb 只随 Host 输出走（deploy.ps1 白名单拷到 CAXA bin 根），`DrawingWarmup.FindExb` 从 Contracts.dll 位置逐级向上找（安装布局下 bin 根即命中）；子插件目录出现该文件即视为部署残留。
+
+---
+
+## 6. 插件目录归属铁律（2026-11-21）
+
+源码按运行形态分家，禁止混放：
+
+| 形态 | 源码位置 | 判据 |
+| --- | --- | --- |
+| 独立 EXE 工具 | `C:\code\ICAPI\caxa3dmytoolsaddin\tools\<名字>\` | WinExe、自带 `Program.cs`，进程外运行、不引用 ICAPI |
+| 内置插件 / 启动器 | `C:\code\ICAPI\caxa3dmytoolsaddin\plugins\<名字>\` | Library、实现 `IPlugin`，由 Host 反射加载 |
+
+- 独立 EXE 工具的**启动器 DLL 属于内置插件**，留在 `plugins\<名字>\`；EXE 工程本体必须在 `tools\<名字>\`。当前四个：`caxa3didcskill`、`caxa3dToolboxBackup`、`caxa3dEbxTechSpecsBackup`、`caxa3dtoolboxmaker`（2026-11-21 由仓库外兄弟工程内化）。
+- 独立 EXE 工程不得留在仓库外（如 `C:\code\ICAPI\<名字>`）。`build.ps1` 的工具根目录、启动器 csproj 的 `CopyStandaloneTool`、`package.ps1` 的 `launcherTools.Tool` 一律指向 `tools\<名字>`。
+- `src\plugins\` 只是构建产物暂存目录（`.gitignore` 已忽略），不是源码目录；发布核对单第 1 条同口径。

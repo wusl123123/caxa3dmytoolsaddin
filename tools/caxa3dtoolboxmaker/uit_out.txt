@@ -1,0 +1,20 @@
+Cur字段数=12 参数数=22 规格行数=330
+[OK] CurNodeInfo 解析
+[OK] 参数数=22
+[OK] 规格行数=330
+XML.GUID=75CDDC6E-57A5-4E9A-9590-50D713DDB453 XML.ICSName=全牙外六角螺栓_8.8级-发黑_碳钢_GB／T5783.ics
+[OK] GUID 非空
+[OK] ICSName 非空
+磁盘ics名=全牙外六角螺栓_8.8级-发黑_碳钢_GB／T5783.ics
+ics内部名=全牙外六角螺栓-GB／T5783.ics
+xlsx.GUID=75CDDC6E-57A5-4E9A-9590-50D713DDB453
+[OK] ics内部名可读
+[OK] xlsx GUID可读
+[OK] XML.GUID == xlsx.GUID
+[OK] XML.ICSName == 磁盘ics名
+[OK] ics内部名是旧名(与当前不同)
+[OK] 保格式round-trip字节一致
+[OK] 重载行数一致
+[OK] 重载参数数一致
+[OK] 重载GUID一致
+=== SELFTEST PASS ===

@@ -41,9 +41,9 @@ $toolboxToolProj = Join-Path $root 'tools\caxa3dToolboxBackup\caxa3dToolboxBacku
 $toolboxToolExe  = Join-Path $root 'tools\caxa3dToolboxBackup\bin\x64\Release\net48\caxa3dToolboxBackup.exe'
 $specsToolProj   = Join-Path $root 'tools\caxa3dEbxTechSpecsBackup\caxa3dEbxTechSpecsBackup.csproj'
 $specsToolExe    = Join-Path $root 'tools\caxa3dEbxTechSpecsBackup\bin\x64\Release\net48\caxa3dEbxTechSpecsBackup.exe'
-# 标准件库 XML 编辑器（系统工具列）：源码是仓库外的兄弟工程 caxa3dtoolboxmaker（单一来源），
-# 本仓库只放启动器 DLL；编译外部工程后把 EXE 拷进启动器目录随包部署
-$makerToolRoot = Join-Path $root '..\caxa3dtoolboxmaker'
+# 标准件库 XML 编辑器（系统工具列）：独立 EXE 工程在 tools\caxa3dtoolboxmaker（单一来源），
+# 本仓库 plugins 侧只放启动器 DLL；编译工具工程后把 EXE 拷进启动器目录随包部署
+$makerToolRoot = Join-Path $root 'tools\caxa3dtoolboxmaker'
 $makerToolProj = Join-Path $makerToolRoot 'caxa3dtoolboxmaker.csproj'
 $makerToolExe  = Join-Path $makerToolRoot 'bin\x64\Release\net48\caxa3dtoolboxmaker.exe'
 
@@ -89,8 +89,8 @@ $plugins = @(
     # 后台进程清理（独立插件列）：DLL 只是启动器，真正干活的是随包部署的 caxa3didcskill.exe
     @{ Name = 'caxa3didcskill';              Project = (Join-Path $root 'plugins\caxa3didcskill\caxa3didcskill.csproj');
        Extra = @('.exe'); ExtraSrc = @($idcToolExe) },
-    # 标准件库 XML 编辑器（系统工具列）：源码在仓库外兄弟工程 caxa3dtoolboxmaker，
-    # 启动器 DLL + 独立 EXE，编译外部工程后把 EXE 拷进启动器目录随包部署
+    # 标准件库 XML 编辑器（系统工具列）：独立 EXE 工程在 tools\caxa3dtoolboxmaker，
+    # 启动器 DLL + 独立 EXE，编译工具工程后把 EXE 拷进启动器目录随包部署
     @{ Name = 'caxa3dtoolboxmaker';          Project = (Join-Path $root 'plugins\caxa3dtoolboxmaker\caxa3dtoolboxmaker.csproj');
        Extra = @('.exe'); ExtraSrc = @($makerToolExe) }
 )
@@ -107,7 +107,7 @@ Build-Project $contracts
 Build-Project $idcToolProj
 Build-Project $toolboxToolProj
 Build-Project $specsToolProj
-# 外部兄弟工程：标准件库 XML 编辑器的真正 EXE（本仓库只有启动器 DLL）
+# 独立工具工程：标准件库 XML 编辑器的真正 EXE（plugins 侧只有启动器 DLL）
 Build-Project $makerToolProj
 foreach ($p in $plugins) { Build-Project $p.Project }
 Build-Project $hostProj

@@ -98,7 +98,7 @@ $launcherTools = @(
     @{ Name = 'caxa3didcskill';             Exe = 'caxa3didcskill.exe';             Tool = 'tools\caxa3didcskill' },
     @{ Name = 'caxa3dToolboxBackup';        Exe = 'caxa3dToolboxBackup.exe';        Tool = 'tools\caxa3dToolboxBackup' },
     @{ Name = 'caxa3dEbxTechSpecsBackup';   Exe = 'caxa3dEbxTechSpecsBackup.exe';   Tool = 'tools\caxa3dEbxTechSpecsBackup' },
-    @{ Name = 'caxa3dtoolboxmaker';         Exe = 'caxa3dtoolboxmaker.exe';         Tool = '..\caxa3dtoolboxmaker（仓库外兄弟工程）' }
+    @{ Name = 'caxa3dtoolboxmaker';         Exe = 'caxa3dtoolboxmaker.exe';         Tool = 'tools\caxa3dtoolboxmaker' }
 )
 foreach ($t in $launcherTools) {
     $dir = Join-Path $pluginSrc $t.Name

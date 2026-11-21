@@ -10,8 +10,8 @@ namespace caxa3dtoolboxmaker
     /// <summary>
     /// 「2. 系统工具」列：标准件库 XML 编辑器（外部工具启动器）。
     ///
-    /// 这是独立 EXE（不进 CAXA 进程、不依赖 ICAPI），业务逻辑在仓库外的
-    /// caxa3dtoolboxmaker 工程编译出的 caxa3dtoolboxmaker.exe 里。
+    /// 这是独立 EXE（不进 CAXA 进程、不依赖 ICAPI），业务逻辑在
+    /// tools\caxa3dtoolboxmaker 工程编译出的 caxa3dtoolboxmaker.exe 里。
     /// 本类不实现业务逻辑、不引用 ICAPI、不建窗口、不注册 Ribbon，
     /// 只负责「找到 EXE -> 已有实例则前台化，否则启动」。
     /// </summary>
@@ -79,8 +79,8 @@ namespace caxa3dtoolboxmaker
         /// 解析 EXE 路径，顺序：
         ///   1) 插件目录（部署布局：plugins\caxa3dtoolboxmaker\caxa3dtoolboxmaker.exe）
         ///   2) 启动器 DLL 所在目录（单独 dotnet build 的输出目录）
-        ///   3) 开发布局：逐级向上找兄弟工程 caxa3dtoolboxmaker\bin\x64\Release\net48
-        ///      （本工程在 caxa3dmytoolsaddin，工具工程在同级 caxa3dtoolboxmaker）
+        ///   3) 开发布局：tools\caxa3dtoolboxmaker\bin\x64\Release\net48
+        ///      （本工程在 plugins\caxa3dtoolboxmaker，工具工程在仓库 tools 下）
         /// </summary>
         private string ResolveExePath()
         {
@@ -101,9 +101,9 @@ namespace caxa3dtoolboxmaker
                     DirectoryInfo dir = new DirectoryInfo(asmDir);
                     for (int level = 0; level < MaxParentLevels && dir != null; level++)
                     {
-                        // 兄弟工程：从 caxa3dmytoolsaddin 的任一级向上拼 ..\caxa3dtoolboxmaker
+                        // 开发布局：从当前目录任一级向上拼 tools\caxa3dtoolboxmaker
                         string dev = Path.Combine(dir.FullName,
-                            @"..\caxa3dtoolboxmaker\bin\x64\Release\net48\" + ExeName);
+                            @"tools\caxa3dtoolboxmaker\bin\x64\Release\net48\" + ExeName);
                         if (File.Exists(dev)) return dev;
                         dir = dir.Parent;
                     }
